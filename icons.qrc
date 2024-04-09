@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="icons">
+    <file>icons/blue-document-attribute-b.png</file>
+  </qresource>
+</RCC>
