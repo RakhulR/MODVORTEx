@@ -4,6 +4,7 @@ Created on Thu Apr  6 17:06:11 2023
 
 @author: Rakhul Raj
 """
+from typing import Tuple, List
 import cv2
 import numpy as np
 import pandas as pd
@@ -17,16 +18,19 @@ from shapely.geometry import Point as Pnt
 from scipy.spatial import KDTree
 from PyQt5.QtCore import Qt, QPoint
 
-
 x5 = (500/188)
 x20 = (100/149)
 
-# cal_file = pathlib.Path(r'E:\Data\Rakhul\Domain Motion\V_Field_PCoil.txt')
-cal_file = pathlib.Path(r'D:\Lab Data\Domain Motion\V_Field_PCoil.txt')
+file_list: List[pathlib.Path]= []
+file_list.append(pathlib.Path(r'E:\Data\Rakhul\Domain Motion\V_Field_PCoil.txt'))
+file_list.append(pathlib.Path(r'\\USER-PC\Data\Rakhul\Domain Motion\V_Field_PCoil.txt'))
+file_list.append(pathlib.Path(r'D:\Lab Data\Domain Motion\V_Field_PCoil.txt'))
 
-
+for cal_file in file_list:
+    if cal_file.exists():
+        break
 if not cal_file.exists():
-    cal_file = pathlib.Path(r'\\USER-PC\Data\Rakhul\Domain Motion\V_Field_PCoil.txt')
+    raise FileNotFoundError('Calibration File Not Found')
 
 cal = pd.read_csv(cal_file, delimiter ='\t', header = None, usecols = [0,1])
 
@@ -146,7 +150,11 @@ def image_from_coords(coords : np.array,
     '''
     if new_image is None:
         
-        new_image  = np.zeros(shape)
+        new_image  = np.zeros(shape, np.uint8)
+        
+    # dws_contours = [np.expand_dims(coords, axis=1)] 
+    
+    # cv2.drawContours(new_image, dws_contours, 0, [255,255,255], 1) # this will not work for random shaped domains
         
     for x in coords:
         
@@ -332,7 +340,7 @@ def parallel_lines(point2, point1, outline):
     return lines
 
 
-def get_pwidth(path: pathlib.Path) -> (float, str):
+def get_pwidth(path: pathlib.Path) -> Tuple[float, str]:
     """
     extract the pulse width and unit from the domain image file name
 
@@ -420,7 +428,7 @@ def bdw_detect(image, center):
         c1 = np.array([])
     
     return c1.squeeze()
-
+#1 implementation remaining - color and radius
 def mark_center(contour, image, color = None, radius = 3):
     '''
     Mark center of a contour in the provided image
@@ -447,16 +455,64 @@ def mark_center(contour, image, color = None, radius = 3):
     # drawing circle around the contour center
     cv2.circle(image, (center.x, center.y), 5, 255, -1)
 
-def dt_curve(paths : pathlib.Path, voltage : str, out_path, measurmentType, binarize) -> pd.DataFrame:
+# def dt_curve(paths : pathlib.Path, voltage : str, measurmentType, binarize) -> pd.DataFrame:
+#     '''
+#     Takes the parent path which contains the voltage measurements and returns 
+#     a displacement v/s pulse_width data
+    
+#     Parameters
+#     ----------
+#     path : pathlib.Path
+#         Parent path which contain the voltage folders.
+#     voltage : str or int
+#         Starting of the voltage folder names. For example if the folders are 25V,25V_1
+#         25V_2, 25V_3 etc then 25 or 25V can be given as voltage.
+    
+#     Returns
+#     -------
+#     dta1 : Pandas DataFrame
+#         Returns displacement v/s pulse_width data.
+    
+#     '''
+        
+#     dta = pd.DataFrame(columns = ['pulse_width', 'displacement'])
+    
+#     for path in list(paths.glob(f'{voltage}V*')):
+#         # print(path)
+#         images = [*path.glob('*.png')]
+#         pulse_width = get_pwidth(images[0])[0]
+#         images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
+#         displacement = calculate_motion(images, measurmentType, binarize)
+#         displacement = [x for x in displacement if x]
+#         displacement = np.mean([np.mean(dis) for dis in displacement])
+        
+#         dta.loc[len(dta)] = [pulse_width, displacement]
+#     dta1 =  pd.DataFrame(columns = ['pulse_width', 'displacement'])
+#     dta['pulse_width'] = np.round(dta['pulse_width'],6)
+#     dta =  dta[np.logical_not(np.isnan(dta['displacement']))]
+#     for x in set(dta['pulse_width']):
+#         if not np.isnan( x ):
+            
+#             #dataframe.append will be deprecated in future pandas so going to us concat insted
+#             #dta1 = dta1.append(dta[dta['pulse_width']==x].mean(),ignore_index=True)
+#             dta1 = pd.concat([dta1,dta[dta['pulse_width']==x].mean().to_frame().T],ignore_index=True)
+#     dta1.sort_values(by = 'pulse_width', inplace = True)
+#     dta1.reset_index(drop = True, inplace = True)
+#     return dta1
+
+def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, measurmentType, binarize) -> pd.DataFrame:
     '''
     Takes the parent path which contains the voltage measurements and returns 
-    a displacement v/s pulse_width data
+    a displacement v/s pulse_width data. it only considers the first pulse for the displacement measurement
     
     Parameters
     ----------
     path : pathlib.Path
         Parent path which contain the voltage folders.
-    voltage : str or int
+        
+    pulse_select : int
+        which pulse should used for 
+    voltage : str or int (recommends str)
         Starting of the voltage folder names. For example if the folders are 25V,25V_1
         25V_2, 25V_3 etc then 25 or 25V can be given as voltage.
     
@@ -467,32 +523,92 @@ def dt_curve(paths : pathlib.Path, voltage : str, out_path, measurmentType, bina
     
     '''
         
-    dta = pd.DataFrame(columns = ['pulse_width', 'displacement'])
-    
+    dta = pd.DataFrame(columns = ['pulse_width', 'displacement', 'std'])
+    data = {}
     for path in list(paths.glob(f'{voltage}V*')):
         # print(path)
         images = [*path.glob('*.png')]
         pulse_width = get_pwidth(images[0])[0]
         images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-        displacement = calculate_motion(images, out_path, measurmentType, binarize)
-        displacement = [x for x in displacement if x]
-        displacement = np.mean([np.mean(dis) for dis in displacement])
+        displacement = calculate_motion(images, measurmentType, binarize)
+        displacement = [x[0:1] for x in displacement if x]    # [0] here is for selecting the displacement from 1st intercetion
+        displacement = np.array([x for y in displacement for x in y])
         
-        dta.loc[len(dta)] = [pulse_width, displacement]
-    dta1 =  pd.DataFrame(columns = ['pulse_width', 'displacement'])
-    dta['pulse_width'] = np.round(dta['pulse_width'],6)
-    dta =  dta[np.logical_not(np.isnan(dta['displacement']))]
-    for x in set(dta['pulse_width']):
-        if not np.isnan( x ):
-            
-            #dataframe.append will be deprecated in future pandas so going to us concat insted
-            #dta1 = dta1.append(dta[dta['pulse_width']==x].mean(),ignore_index=True)
-            dta1 = pd.concat([dta1,dta[dta['pulse_width']==x].mean().to_frame().T],ignore_index=True)
-    dta1.sort_values(by = 'pulse_width', inplace = True)
-    dta1.reset_index(drop = True, inplace = True)
-    return dta1
+        pulse_width = np.round(pulse_width, 6)
+        if not pulse_width in data:
+        
+            data[pulse_width] = displacement
+        
+        else:
+        
+            data[pulse_width] = np.concatenate(( data[pulse_width], displacement))
+        
+    for pulse_width, displacement in data.items():
+    
+        if displacement.size > 0:
+    
+            disp = displacement.mean()
+            std = displacement.std()
+            dta.loc[len(dta)] = [pulse_width, disp, std]
+    
+    dta.sort_values(by = 'pulse_width', inplace = True)
+    dta.reset_index(drop = True, inplace = True)
+    return dta
 
-def calculate_motion(images, out_path, measurmentType, binarize):
+
+def dt_curve(paths : pathlib.Path, voltage : str, measurmentType, binarize) -> pd.DataFrame:
+    '''
+    Takes the parent path which contains the voltage measurements and returns 
+    a displacement v/s pulse_width data
+    
+    Parameters
+    ----------
+    path : pathlib.Path
+        Parent path which contain the voltage folders.
+    voltage : str or int (recommends str)
+        Starting of the voltage folder names. For example if the folders are 25V,25V_1
+        25V_2, 25V_3 etc then 25 or 25V can be given as voltage.
+    
+    Returns
+    -------
+    dta1 : Pandas DataFrame
+        Returns displacement v/s pulse_width data.
+    
+    '''
+        
+    dta = pd.DataFrame(columns = ['pulse_width', 'displacement', 'std'])
+    data = {}
+    for path in list(paths.glob(f'{voltage}V*')):
+        # print(path)
+        images = [*path.glob('*.png')]
+        pulse_width = get_pwidth(images[0])[0]
+        images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
+        displacement = calculate_motion(images, measurmentType, binarize)
+        displacement = [x for x in displacement if x]
+        displacement = np.array([x for y in displacement for x in y])
+        
+        pulse_width = np.round(pulse_width, 6)
+        if not pulse_width in data:
+        
+            data[pulse_width] = displacement
+        
+        else:
+        
+            data[pulse_width] = np.concatenate(( data[pulse_width], displacement))
+        
+    for pulse_width, displacement in data.items():
+    
+        if displacement.size > 0:
+    
+            disp = displacement.mean()
+            std = displacement.std()
+            dta.loc[len(dta)] = [pulse_width, disp, std]
+    
+    dta.sort_values(by = 'pulse_width', inplace = True)
+    dta.reset_index(drop = True, inplace = True)
+    return dta
+
+def calculate_motion(images, measurmentType, binarize):
     
     point2 = measurmentType.point2
     point1 = measurmentType.point1
@@ -543,7 +659,7 @@ def calculate_motion(images, out_path, measurmentType, binarize):
         # uses a edege detection
         dws = [dw_detect(image) for image in bin_imgs]
     # to change scale for auto measurements change here 
-    motion = Domain_mot(dws, scale=x5)
+    motion = Domain_mot(dws, scale=x20)
     
     lines = parallel_lines(point2, point1, outline)
     
@@ -552,3 +668,236 @@ def calculate_motion(images, out_path, measurmentType, binarize):
     # distance = motion.distance([point2, point1,])
 
     return distance
+
+# return the domain motion insted of the average displacement
+def calculate_domain_motion(images, measurmentType, binarize):
+    
+    point2 = measurmentType.point2
+    point1 = measurmentType.point1
+    outline = measurmentType.outline
+
+    # bin_imgs = [self.binarize(image)[0] for image in images]
+    
+    bin_imgs = []
+    # from the binarize type to figure out if image should be inverted or not
+    # cv2.THRESH_BINARY_INV is for dark nucleated domains and other for light nucleated domains
+    type_of_binarize = cv2.THRESH_BINARY_INV if binarize.inverse else cv2.THRESH_BINARY
+    
+    img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
+    
+    for ii, img_gus in enumerate(img_guses):
+        
+        
+        if binarize.threshold == 'otsu':
+            
+            if ii == 0:
+                
+                img_ext = np.concatenate( (img_gus, img_guses[-1]), axis=1, dtype=np.uint8)
+                
+                th, ret = cv2.threshold(img_ext, 0, 255, type_of_binarize + cv2.THRESH_OTSU)
+                
+                ret = np.split(ret, [img_ext.shape[1]//2], axis=1)[0]
+                ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
+                ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
+                
+            else : 
+                
+                th, ret = cv2.threshold(img_gus, 0, 255, type_of_binarize + cv2.THRESH_OTSU)
+        else:
+            th, ret = cv2.threshold(img_gus, binarize.threshold , 255, type_of_binarize)
+        
+        bin_imgs.append(ret)
+   
+    # selecting according to the type of measurements
+    if measurmentType == 0:
+        
+        # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
+        dws = [bdw_detect(image, measurmentType.center) for image in bin_imgs]
+        
+    elif measurmentType == 1:
+        
+        
+        # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
+        # uses a edege detection
+        dws = [dw_detect(image) for image in bin_imgs]
+    # to change scale for auto measurements change here 
+    motion = Domain_mot(dws, scale=x20)
+    
+    return motion
+
+# cli or code insert type of mesurementType and binarize
+class Binarize_Type():
+    
+    def __init__(self, threshold:int,  inverse:bool, threshold_value:int = 149):
+        """
+        
+
+        Parameters
+        ----------
+        threshold : int
+            1 for otsu, 0 for custom.
+        inverse : bool
+            if inversing the image necessary.
+        threshold_value : int, optional
+            threshold value that should be used for custom. The default is 149.
+
+        Raises
+        ------
+        ValueError
+            if value of threshold not zero or one then raises error.
+
+        Returns
+        -------
+        Binarize_Type_cli object.
+
+        """
+        self.index = threshold
+        if threshold == 1:
+            self.threshold = 'otsu'
+        elif threshold == 0:
+            self.threshold = threshold_value
+        else:
+            raise ValueError("threshold can only be 0 or 1 zero for custom and 1 for otsu")
+        
+        self.inverse  = inverse
+        
+    @classmethod
+    def from_window(cls, window):
+        index = window.b_combo_box.currentIndex()
+        if index == 1:
+            threshold = 'otsu'
+        else:
+            threshold = window.spinBox.value()
+        inverse = window.inverse.isChecked()
+        return cls(index, inverse, threshold)
+        
+    def __eq__(self, other):
+        
+        return self.index == other
+    
+    def binarize_list(self, images):
+        """
+        This function binarizes a list of input images based on the instance's threshold and inverse attributes.
+    
+        Parameters:
+        images (list of np.array): The input images to be binarized. They should be grayscale images.
+    
+        Returns:
+        bin_imgs (list of np.array): The binarized images.
+    
+        The function first applies a Gaussian blur to each image. Then, depending on the threshold attribute of the instance,
+        it applies Otsu's binarization or simple thresholding. If the inverse attribute is True, the binary images are inverted.
+        """
+        # Initialize the list to store the binarized images
+        bin_imgs = []
+        
+        # Determine the type of thresholding to be applied based on the inverse attribute
+        type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
+        
+        # Apply Gaussian blur to each image
+        img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
+        
+        # Iterate over each blurred image
+        for ii, img_gus in enumerate(img_guses):
+            # Check if the threshold attribute is set to 'otsu'
+            if self.threshold == 'otsu':
+                # If it's the first image
+                if ii == 0:
+                    # Concatenate the blurred image with the last blurred image along the horizontal axis
+                    img_ext = np.concatenate( (img_gus, img_guses[-1]), axis=1, dtype=np.uint8)
+                    # Apply Otsu's binarization
+                    th, ret = cv2.threshold(img_ext, 0, 255, type_of_self + cv2.THRESH_OTSU)
+                    # Split the binarized image and keep the first half
+                    ret = np.split(ret, [img_ext.shape[1]//2], axis=1)[0]
+                    # Convert the image from grayscale to BGR and back to grayscale
+                    ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
+                    ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
+                else : 
+                    # Apply Otsu's binarization for the other images
+                    th, ret = cv2.threshold(img_gus, 0, 255, type_of_self + cv2.THRESH_OTSU)
+            else:
+                # Apply simple thresholding if the threshold attribute is not set to 'otsu'
+                th, ret = cv2.threshold(img_gus, self.threshold , 255, type_of_self)
+            
+            
+            # yield ret
+            # Append the binarized image to the list
+            bin_imgs.append(ret)
+            
+        # Return the list of binarized images
+        return bin_imgs
+        
+    def binarize(self, image):
+        """
+        This function binarizes an input image based on the instance's threshold and inverse attributes.
+    
+        Parameters:
+        image (np.array): The input image to be binarized. It should be a grayscale image.
+    
+        Returns:
+        ret (np.array): The binarized image.
+    
+        The function first applies a Gaussian blur to the image. Then, depending on the threshold attribute of the instance,
+        it applies Otsu's binarization or simple thresholding. If the inverse attribute is True, the binary image is inverted.
+        """
+        # Determine the type of thresholding to be applied based on the inverse attribute
+        type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
+    
+        # Apply Gaussian blur to the image
+        image_gus = cv2.GaussianBlur(image, (25,25),0)
+    
+        # Check if the threshold attribute is set to 'otsu'
+        if self.threshold == 'otsu':
+            
+            # Apply Otsu's binarization
+            th, ret = cv2.threshold(image_gus, 0, 255, type_of_self + cv2.THRESH_OTSU)
+            # # Convert the image from grayscale to BGR and back to grayscale
+            # ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
+            # ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
+        else:
+            # Apply simple thresholding if the threshold attribute is not set to 'otsu'
+            th, ret = cv2.threshold(image_gus, self.threshold , 255, type_of_self)
+    
+        # Return the binarized image
+        return ret
+
+
+        
+    
+class Meas_Type_cli():
+    
+    def __init__(self, mtype:int, point2:Point, point1:Point, outline:int, 
+                 center:Point = Point(371,278)):
+        """
+        
+
+        Parameters
+        ----------
+        mtype : int
+            0 for closed domain, 1 for random shape.
+        point2 : ps.Point
+            first click point of the straight line.
+        point1 : ps.Point
+            2nd click point of the straight line.
+        outline : int
+            spread of the line, 3.
+        center : ps.Point, optional
+            DESCRIPTION. The default is ps.Point(371,278).
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        self.index = mtype
+        # point2 is the first click and point1 is second click        
+        self.point2 = point2
+        self.point1 = point1
+        self.outline =  outline
+        self.center = center
+        
+    def __eq__(self, other):
+        
+        return self.index == other
+    

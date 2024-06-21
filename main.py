@@ -6,28 +6,34 @@ Created on Wed Mar  1 15:24:16 2023
 """
 import sys
 import re
+import os
 import pathlib
 from pathlib import Path
 import pandas as pd
 import cv2
 from PyQt5.QtWidgets import (QMainWindow,
                              QApplication,
+                             QMessageBox,
                              QFileDialog,
                              QLabel, 
                              QShortcut,
-                             QSizePolicy
+                             QSizePolicy,
+                             QWidget
     )
 from PyQt5 import uic
-from PyQt5.QtCore import QSize, QPoint
+from PyQt5.QtCore import QSize, QPoint, Qt
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence
 import numpy as np
 import icons
 from custom_widgets import MyLabel
 import processing as ps
 # iconSize = QSize(3000,3000)
+import multiprocessing
 from multiprocessing import Pool
 from functools import partial
 import matplotlib.pyplot as plt
+from mymodule.utils import decorate_all_methods
+from mymodule.exceptions import exception_handler
 
 try:
     # This will only work in IPython
@@ -36,14 +42,21 @@ try:
     ipython.run_line_magic("matplotlib", '')
 except NameError:
     pass
-   
+
+if getattr(sys, 'frozen', False):
+    # If the application is run as a bundle, the PyInstaller bootloader
+    # extends the sys module by a flag frozen=True and sets the app
+    # path into variable _MEIPASS'.
+    application_path = Path(sys._MEIPASS)
+else:
+    application_path = Path(os.path.dirname(os.path.abspath(__file__)))
 
 
 def do(volt, paths, out_path, measurmentType, binarize):
     
     out = ps.float_str(ps.field(float(volt)/10),2) + 'mT.txt'
     
-    dat = ps.dt_curve(paths, volt,out_path, measurmentType, binarize)
+    dat = ps.dt_curve(paths, volt, measurmentType, binarize)
     
     mt = measurmentType
     bi = binarize
@@ -55,12 +68,13 @@ def do(volt, paths, out_path, measurmentType, binarize):
         f.write(string)
     dat.to_csv(out_path/out, mode = 'a',  sep = '\t', index = False)
 
+@decorate_all_methods(exception_handler)
 class MainWindow(QMainWindow):
     
     def __init__(self):
         
         super(MainWindow, self).__init__()
-        uic.loadUi("mainwindow.ui", self)
+        uic.loadUi(application_path/"mainwindow_v.ui", self)
         # self.toolButton.setIconSize(iconSize)
         # setting slot for the qaction
         self.actionBinarizeImage.triggered.connect(self.display_binarized)
@@ -126,6 +140,7 @@ class MainWindow(QMainWindow):
         
         # set the file filter to show only .py files
         # dialog.setNameFilter("Python files (*.png)")
+    
     def loadfolder_f(self):
         # create a file dialog object
         dialog = QFileDialog()
@@ -172,7 +187,7 @@ class MainWindow(QMainWindow):
                 
             text = self.textInputFolder.toPlainText()
             path = pathlib.Path(text)
-            images = path.glob('*.png')
+            images =[* path.glob('*.png')][::1]
         
             images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
             self.images = images
@@ -226,7 +241,7 @@ class MainWindow(QMainWindow):
             
             # data_img  = [self.qimage_to_numpy(image) for image in self.images]
             data_img  = self.images
-            bin_type = Binarize_Type(self)
+            bin_type = ps.Binarize_Type.from_window(self)
             if  bin_type == 1:
                 
                 # binarized_img = [self.otsu_binarize(image) for image in data_img]
@@ -457,7 +472,7 @@ class MainWindow(QMainWindow):
     
     def binarize(self, image):
         
-        bin_type = Binarize_Type(self)
+        bin_type = ps.Binarize_Type.from_window(self)
         
         if bin_type == 1:
             
@@ -640,12 +655,20 @@ class MainWindow(QMainWindow):
         
         if not out_path.exists():
             out_path.mkdir()
+        else:
+            # if the overwrite checkbok is not checked it will skip this directory
+            if not self.bulk_overwrite_check.isChecked():
+                QMessageBox(QMessageBox.Warning, 
+                            "Warning", 
+                            f"Specified Folder '{self.save_folder.text()}' Already Exists in the directory'{paths.name}'",
+                            parent= self).exec()
+                return None
         
         volts= ps.find_volt(paths)
             
         arguments = dict(
         measurmentType = Meas_Type(window = self),
-        binarize = Binarize_Type(window = self))
+        binarize = ps.Binarize_Type.from_window(window = self))
 
             
         do_partial =  partial(do,paths = paths, out_path = out_path, **arguments)    
@@ -671,7 +694,7 @@ class MainWindow(QMainWindow):
         
         arguments = dict(
         measurmentType = Meas_Type(window = self),
-        binarize = Binarize_Type(window = self))
+        binarize = ps.Binarize_Type.from_window(window = self))
         
         iter_path = [path for path in paths_parent.iterdir()]
         
@@ -688,7 +711,13 @@ class MainWindow(QMainWindow):
                 else:
                     # if the overwrite checkbok is not checked it will skip this directory
                     if not self.bulk_overwrite_check.isChecked():
-                        
+                        msg_box = QMessageBox(QMessageBox.Warning, 
+                                    "Warning", 
+                                    f"Specified Folder '{folder_name}' Already Exists in the directory'{paths.name}'" ,
+                                    parent = self)
+                        msg_box.setModal(False)
+                        msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowStaysOnTopHint)
+                        msg_box.show()
                         continue
                         
                 print(paths)
@@ -741,7 +770,7 @@ class MainWindow(QMainWindow):
             string= comments[0].replace('# ', '').replace(',  ', '\n')            
         else:            
             mt = Meas_Type(window = self)
-            bi = Binarize_Type(window = self)
+            bi = ps.Binarize_Type.from_window(window = self)
             
             string = f'''point2 : {mt.point2}
 point1 : {mt.point1}
@@ -759,6 +788,9 @@ outline : {mt.outline}'''
                                sep = '\t',
                                comment = comment_char
                                )
+            if data.empty:
+                print(f"{str(file)} does not contain any data")
+                continue
             data.plot(x = 0, y = 1 , style = 'o', label = file.name.split('.txt')[0], ax = ax)
             
 
@@ -785,27 +817,10 @@ class Meas_Type():
         
         return self.index == other
     
-class Binarize_Type():
-    
-    def __init__(self, window):
-        
-        self.index = window.b_combo_box.currentIndex()
-        
-        if self.index == 1:
-            
-            self.threshold = 'otsu'
-        else:
-            
-            self.threshold = window.spinBox.value()
-            
-        self.inverse = window.inverse.isChecked()
-            
-    def __eq__(self, other):
-        
-        return self.index == other
-    
-    
+
+ #%%   
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     # create an application object
     app = QApplication(sys.argv)
     # create an example object
