@@ -401,9 +401,6 @@ class MainWindow(QMainWindow):
         
         return (ret, th , contour)
     
-    def edge_detection(self, method):
-        
-        ret = [cv2.Canny(img, 0, 255, 7) for img in self.binarized_img]
         
     def def_direction(self):
         
@@ -474,40 +471,16 @@ class MainWindow(QMainWindow):
         
         tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
         [tab.set_outline(number) for tab in tabs]
-    
-    def binarize(self, image):
-        
-        bin_type = ps.Binarize_Type.from_window(self)
-        
-        if bin_type == 1:
-            
-            if np.all(image == self.images[0]):
-                
-                imag_ext = np.concatenate((image, self.images[-1]), axis=1, dtype=np.uint8)
-                ret, ch, con = self.otsu_binarize(imag_ext, bin_type)
-                ret = np.split(ret, [imag_ext.shape[1]//2], axis=1)[0]
-                ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
-                ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
-                img_plus = ( ret, ch, con )
-            else:
-         
-                binarize = self.otsu_binarize
-                img_plus = binarize(image, bin_type)
-        else:
-            binarize = self.custom_binarize
-            img_plus = binarize(image, bin_type)
-            
-        return img_plus
-            
-            
+     
+      
     def add_edge(self):
         
         # if self.b_combo_box.currentIndex() == 1:
         #     binarize = self.otsu_binarize
         # else:
         #     binarize = lambda image : self.custom_binarize(image, self.spinBox.value())
-            
-        bin_imgs = [self.binarize(image)[0] for image in self.images]
+        binarize = ps.Binarize_Type.from_window(self)
+        bin_imgs = binarize.binarize_list(images= self.images)
         
         # creating a ne Meas_Type object. Advantage of this object is that if its bubble type domain
         # its easy to pass the center to the bdw_detect function
