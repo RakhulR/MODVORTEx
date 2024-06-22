@@ -100,7 +100,12 @@ class MainWindow(QMainWindow):
         self.loadPointsButton.clicked.connect(self.def_direction)
         self.dial.valueChanged.connect(self.outline_dial)
         self.genEdges.clicked.connect(self.add_edge)
-        self.calcButton.clicked.connect(self.calculate_motion)
+        self.calcButton.clicked.connect(lambda : print(
+                                                        ps.calculate_motion(self.images, Meas_Type(self), 
+                                                                         ps.Binarize_Type.from_window(self)
+                                                                         )
+                                                        )
+                                        )
         self.calcAllButton.clicked.connect(self.calculate_all)
         self.bulkcalcButton.clicked.connect(self.calculate_all_from_parent)
         
@@ -559,93 +564,6 @@ class MainWindow(QMainWindow):
 
         self.tabWidget.addTab(tab, 'edges')
         
-    def calculate_motion(self, images = None):
-        
-        # point2 = ps.Point(self.linep1_x.value(),self.linep1_y.value())
-        # point1 = ps.Point(self.linep2_x.value(), self.linep2_y.value())
-        # outline =  self.dial.value()
-        if images:
-            bin_imgs = [self.binarize(image)[0] for image in images]
-        
-        else:
-            bin_imgs = [self.binarize(image)[0] for image in self.images]
-            
-        # creating a ne Meas_Type object. Advantage of this object is that if its bubble type domain
-        # its easy to pass the center to the bdw_detect function
-        measurmentType = Meas_Type(window = self)
-        point2 = measurmentType.point2
-        point1 = measurmentType.point1
-        outline = measurmentType.outline
-        # selecting according to the type of measurements
-        if measurmentType == 0:
-            
-            # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
-            dws = [ps.bdw_detect(image, measurmentType.center) for image in bin_imgs]
-            
-        elif measurmentType == 1:
-            
-            
-            # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
-            # uses a edege detection
-            dws = [ps.dw_detect(image) for image in bin_imgs]
-    
-        motion = ps.Domain_mot(dws)
-        
-        lines = ps.parallel_lines(point2, point1, outline)
-        
-        distance = [motion.distance(line) for line in lines]
-
-        # distance = motion.distance([point2, point1,])
-        if not images:
-            print(distance)
-        return distance
-        
-        
-    def dt_curve(self, paths : pathlib.Path, voltage : str) -> pd.DataFrame:
-        '''
-        Takes the parent path which contains the voltage measurements and returns 
-        a displacement v/s pulse_width data
-        
-        Parameters
-        ----------
-        path : pathlib.Path
-            Parent path which contain the voltage folders.
-        voltage : str or int
-            Starting of the voltage folder names. For example if the folders are 25V,25V_1
-            25V_2, 25V_3 etc then 25 or 25V can be given as voltage.
-        
-        Returns
-        -------
-        dta1 : Pandas DataFrame
-            Returns displacement v/s pulse_width data.
-        
-        '''
-            
-        dta = pd.DataFrame(columns = ['pulse_width', 'displacement'])
-        
-        for path in list(paths.glob(f'{voltage}*')):
-            # print(path)
-            images = [*path.glob('*.png')]
-            pulse_width = ps.get_pwidth(images[0])[0]
-            images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-            displacement = self.calculate_motion(images)
-            displacement = [x for x in displacement if x]
-            displacement = np.mean([np.mean(dis) for dis in displacement])
-            
-            dta.loc[len(dta)] = [pulse_width, displacement]
-        dta1 =  pd.DataFrame(columns = ['pulse_width', 'displacement'])
-        dta['pulse_width'] = np.round(dta['pulse_width'],6)
-        dta =  dta[np.logical_not(np.isnan(dta['displacement']))]
-        for x in set(dta['pulse_width']):
-            if not np.isnan( x ):
-                
-                #dataframe.append will be deprecated in future pandas so going to us concat insted
-                #dta1 = dta1.append(dta[dta['pulse_width']==x].mean(),ignore_index=True)
-                dta1 = pd.concat([dta1,dta[dta['pulse_width']==x].mean().to_frame().T],ignore_index=True)
-        dta1.sort_values(by = 'pulse_width', inplace = True)
-        dta1.reset_index(drop = True, inplace = True)
-        return dta1
-
         
     def calculate_all(self):
         

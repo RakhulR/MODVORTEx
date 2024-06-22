@@ -4,7 +4,7 @@ Created on Thu Apr  6 17:06:11 2023
 
 @author: Rakhul Raj
 """
-from typing import Tuple, List
+from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 import pandas as pd
@@ -17,6 +17,20 @@ from shapely.geometry import MultiPoint, GeometryCollection, MultiLineString
 from shapely.geometry import Point as Pnt
 from scipy.spatial import KDTree
 from PyQt5.QtCore import Qt, QPoint
+
+
+# if TYPE_CHECKING:
+from typing import Tuple, List, Any, TypeVar
+from main import Meas_Type
+from PyQt5.QtWidgets import QWidget
+# import numpy.typing as npt
+
+# Define custom types
+GrayImage = TypeVar('GrayImage', bound= np.ndarray[Tuple[Any, Any], np.uint8])
+BGRImage = TypeVar('BGRImage', bound= np.ndarray[Tuple[Any, Any, 3], np.uint8])
+Image = TypeVar('Image', bound= np.ndarray[Tuple[Any, Any, 0|3], np.uint8])
+Contour = TypeVar('Contour', bound= np.ndarray[Tuple[Any, 1, 2], np.uint8])
+# end
 
 x5 = (500/188)
 x20 = (100/149)
@@ -39,6 +53,142 @@ cal = pd.read_csv(cal_file, delimiter ='\t', header = None, usecols = [0,1])
 # =============================================================================
 field = interp1d(cal[0], cal[1])
 
+# cli or code insert type of mesurementType and binarize
+class Binarize_Type():
+    
+    def __init__(self, threshold:int,  inverse:bool, threshold_value:int = 149):
+        """
+        
+
+        Parameters
+        ----------
+        threshold : int
+            1 for otsu, 0 for custom.
+        inverse : bool
+            if inversing the image necessary.
+        threshold_value : int, optional
+            threshold value that should be used for custom. The default is 149.
+
+        Raises
+        ------
+        ValueError
+            if value of threshold not zero or one then raises error.
+
+        Returns
+        -------
+        Binarize_Type_cli object.
+
+        """
+        self.index = threshold
+        if threshold == 1:
+            self.threshold = 'otsu'
+        elif threshold == 0:
+            self.threshold = threshold_value
+        else:
+            raise ValueError("threshold can only be 0 or 1 zero for custom and 1 for otsu")
+        
+        self.inverse  = inverse
+        
+    @classmethod
+    def from_window(cls, window: QWidget):
+        index = window.b_combo_box.currentIndex()
+        if index == 1:
+            threshold = 'otsu'
+        else:
+            threshold = window.spinBox.value()
+        inverse = window.inverse.isChecked()
+        return cls(index, inverse, threshold)
+        
+    def __eq__(self, other):
+        
+        return self.index == other
+    
+    def binarize_list(self, images: List[np.array]):
+        """
+        This function binarizes a list of input images based on the instance's threshold and inverse attributes.
+    
+        Parameters:
+        images (list of np.array): The input images to be binarized. They should be grayscale images.
+    
+        Returns:
+        bin_imgs (list of np.array): The binarized images.
+    
+        The function first applies a Gaussian blur to each image. Then, depending on the threshold attribute of the instance,
+        it applies Otsu's binarization or simple thresholding. If the inverse attribute is True, the binary images are inverted.
+        """
+        # Initialize the list to store the binarized images
+        bin_imgs = []
+        
+        # Determine the type of thresholding to be applied based on the inverse attribute
+        type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
+        
+        # Apply Gaussian blur to each image
+        img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
+        
+        # Iterate over each blurred image
+        for ii, img_gus in enumerate(img_guses):
+            # Check if the threshold attribute is set to 'otsu'
+            if self.threshold == 'otsu':
+                # If it's the first image
+                if ii == 0:
+                    # Concatenate the blurred image with the last blurred image along the horizontal axis
+                    img_ext = np.concatenate( (img_gus, img_guses[-1]), axis=1, dtype=np.uint8)
+                    # Apply Otsu's binarization
+                    th, ret = cv2.threshold(img_ext, 0, 255, type_of_self + cv2.THRESH_OTSU)
+                    # Split the binarized image and keep the first half
+                    ret = np.split(ret, [img_ext.shape[1]//2], axis=1)[0]
+                    # Convert the image from grayscale to BGR and back to grayscale
+                    ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
+                    ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
+                else : 
+                    # Apply Otsu's binarization for the other images
+                    th, ret = cv2.threshold(img_gus, 0, 255, type_of_self + cv2.THRESH_OTSU)
+            else:
+                # Apply simple thresholding if the threshold attribute is not set to 'otsu'
+                th, ret = cv2.threshold(img_gus, self.threshold , 255, type_of_self)
+            
+            
+            # yield ret
+            # Append the binarized image to the list
+            bin_imgs.append(ret)
+            
+        # Return the list of binarized images
+        return bin_imgs
+        
+    def binarize(self, image: GrayImage) -> GrayImage:
+        """
+        This function binarizes an input image based on the instance's threshold and inverse attributes.
+    
+        Parameters:
+        image (np.array): The input image to be binarized. It should be a grayscale image.
+    
+        Returns:
+        ret (np.array): The binarized image.
+    
+        The function first applies a Gaussian blur to the image. Then, depending on the threshold attribute of the instance,
+        it applies Otsu's binarization or simple thresholding. If the inverse attribute is True, the binary image is inverted.
+        """
+        # Determine the type of thresholding to be applied based on the inverse attribute
+        type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
+    
+        # Apply Gaussian blur to the image
+        image_gus = cv2.GaussianBlur(image, (25,25),0)
+    
+        # Check if the threshold attribute is set to 'otsu'
+        if self.threshold == 'otsu':
+            
+            # Apply Otsu's binarization
+            th, ret = cv2.threshold(image_gus, 0, 255, type_of_self + cv2.THRESH_OTSU)
+            # # Convert the image from grayscale to BGR and back to grayscale
+            # ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
+            # ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
+        else:
+            # Apply simple thresholding if the threshold attribute is not set to 'otsu'
+            th, ret = cv2.threshold(image_gus, self.threshold , 255, type_of_self)
+    
+        # Return the binarized image
+        return ret
+
 def float_str(number, dec_places):
     
     number = str(np.round(number, dec_places))
@@ -49,7 +199,7 @@ def float_str(number, dec_places):
     number = '.'.join(num_list)
     return number
 
-def  find_volt(path):
+def  find_volt(path: pathlib.Path):
     '''
     takes path conataining voltages as input and output a list of voltages in the path
 
@@ -162,7 +312,7 @@ def image_from_coords(coords : np.array,
         
     return new_image
 
-def find_endpoints(edges : np.array, shape : tuple):
+def find_endpoints(edges : np.array, shape : Tuple) -> List[np.array]:
     
     endpoints = []
     
@@ -179,7 +329,7 @@ def find_endpoints(edges : np.array, shape : tuple):
         
     return endpoints
     
-def ordered_edge(edges : np.array, shape : tuple) -> np.array:
+def ordered_edge(edges : np.array, shape : Tuple) -> np.array:
     '''
     
 
@@ -500,7 +650,7 @@ def mark_center(contour, image, color = None, radius = 3):
 #     dta1.reset_index(drop = True, inplace = True)
 #     return dta1
 
-def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, measurmentType, binarize) -> pd.DataFrame:
+def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, measurmentType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
     '''
     Takes the parent path which contains the voltage measurements and returns 
     a displacement v/s pulse_width data. it only considers the first pulse for the displacement measurement
@@ -556,7 +706,7 @@ def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, mea
     return dta
 
 
-def dt_curve(paths : pathlib.Path, voltage : str, measurmentType, binarize) -> pd.DataFrame:
+def dt_curve(paths : pathlib.Path, voltage : str, measurmentType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
     '''
     Takes the parent path which contains the voltage measurements and returns 
     a displacement v/s pulse_width data
@@ -608,7 +758,7 @@ def dt_curve(paths : pathlib.Path, voltage : str, measurmentType, binarize) -> p
     dta.reset_index(drop = True, inplace = True)
     return dta
 
-def calculate_motion(images, measurmentType, binarize):
+def calculate_motion(images, measurmentType: Meas_Type, binarize: Binarize_Type):
     
     point2 = measurmentType.point2
     point1 = measurmentType.point1
@@ -616,35 +766,7 @@ def calculate_motion(images, measurmentType, binarize):
 
     # bin_imgs = [self.binarize(image)[0] for image in images]
     
-    bin_imgs = []
-    # from the binarize type to figure out if image should be inverted or not
-    # cv2.THRESH_BINARY_INV is for dark nucleated domains and other for light nucleated domains
-    type_of_binarize = cv2.THRESH_BINARY_INV if binarize.inverse else cv2.THRESH_BINARY
-    
-    img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
-    
-    for ii, img_gus in enumerate(img_guses):
-        
-        
-        if binarize.threshold == 'otsu':
-            
-            if ii == 0:
-                
-                img_ext = np.concatenate( (img_gus, img_guses[-1]), axis=1, dtype=np.uint8)
-                
-                th, ret = cv2.threshold(img_ext, 0, 255, type_of_binarize + cv2.THRESH_OTSU)
-                
-                ret = np.split(ret, [img_ext.shape[1]//2], axis=1)[0]
-                ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
-                ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
-                
-            else : 
-                
-                th, ret = cv2.threshold(img_gus, 0, 255, type_of_binarize + cv2.THRESH_OTSU)
-        else:
-            th, ret = cv2.threshold(img_gus, binarize.threshold , 255, type_of_binarize)
-        
-        bin_imgs.append(ret)
+    bin_imgs = binarize.binarize_list(images= images)
    
     # selecting according to the type of measurements
     if measurmentType == 0:
@@ -670,7 +792,7 @@ def calculate_motion(images, measurmentType, binarize):
     return distance
 
 # return the domain motion insted of the average displacement
-def calculate_domain_motion(images, measurmentType, binarize):
+def calculate_domain_motion(images, measurmentType: Meas_Type, binarize: Binarize_Type):
     
     point2 = measurmentType.point2
     point1 = measurmentType.point1
@@ -678,36 +800,8 @@ def calculate_domain_motion(images, measurmentType, binarize):
 
     # bin_imgs = [self.binarize(image)[0] for image in images]
     
-    bin_imgs = []
-    # from the binarize type to figure out if image should be inverted or not
-    # cv2.THRESH_BINARY_INV is for dark nucleated domains and other for light nucleated domains
-    type_of_binarize = cv2.THRESH_BINARY_INV if binarize.inverse else cv2.THRESH_BINARY
-    
-    img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
-    
-    for ii, img_gus in enumerate(img_guses):
-        
-        
-        if binarize.threshold == 'otsu':
-            
-            if ii == 0:
-                
-                img_ext = np.concatenate( (img_gus, img_guses[-1]), axis=1, dtype=np.uint8)
-                
-                th, ret = cv2.threshold(img_ext, 0, 255, type_of_binarize + cv2.THRESH_OTSU)
-                
-                ret = np.split(ret, [img_ext.shape[1]//2], axis=1)[0]
-                ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
-                ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
-                
-            else : 
-                
-                th, ret = cv2.threshold(img_gus, 0, 255, type_of_binarize + cv2.THRESH_OTSU)
-        else:
-            th, ret = cv2.threshold(img_gus, binarize.threshold , 255, type_of_binarize)
-        
-        bin_imgs.append(ret)
-   
+    bin_imgs = binarize.binarize_list(images= images)
+
     # selecting according to the type of measurements
     if measurmentType == 0:
         
@@ -725,144 +819,7 @@ def calculate_domain_motion(images, measurmentType, binarize):
     
     return motion
 
-# cli or code insert type of mesurementType and binarize
-class Binarize_Type():
-    
-    def __init__(self, threshold:int,  inverse:bool, threshold_value:int = 149):
-        """
-        
 
-        Parameters
-        ----------
-        threshold : int
-            1 for otsu, 0 for custom.
-        inverse : bool
-            if inversing the image necessary.
-        threshold_value : int, optional
-            threshold value that should be used for custom. The default is 149.
-
-        Raises
-        ------
-        ValueError
-            if value of threshold not zero or one then raises error.
-
-        Returns
-        -------
-        Binarize_Type_cli object.
-
-        """
-        self.index = threshold
-        if threshold == 1:
-            self.threshold = 'otsu'
-        elif threshold == 0:
-            self.threshold = threshold_value
-        else:
-            raise ValueError("threshold can only be 0 or 1 zero for custom and 1 for otsu")
-        
-        self.inverse  = inverse
-        
-    @classmethod
-    def from_window(cls, window):
-        index = window.b_combo_box.currentIndex()
-        if index == 1:
-            threshold = 'otsu'
-        else:
-            threshold = window.spinBox.value()
-        inverse = window.inverse.isChecked()
-        return cls(index, inverse, threshold)
-        
-    def __eq__(self, other):
-        
-        return self.index == other
-    
-    def binarize_list(self, images):
-        """
-        This function binarizes a list of input images based on the instance's threshold and inverse attributes.
-    
-        Parameters:
-        images (list of np.array): The input images to be binarized. They should be grayscale images.
-    
-        Returns:
-        bin_imgs (list of np.array): The binarized images.
-    
-        The function first applies a Gaussian blur to each image. Then, depending on the threshold attribute of the instance,
-        it applies Otsu's binarization or simple thresholding. If the inverse attribute is True, the binary images are inverted.
-        """
-        # Initialize the list to store the binarized images
-        bin_imgs = []
-        
-        # Determine the type of thresholding to be applied based on the inverse attribute
-        type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
-        
-        # Apply Gaussian blur to each image
-        img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
-        
-        # Iterate over each blurred image
-        for ii, img_gus in enumerate(img_guses):
-            # Check if the threshold attribute is set to 'otsu'
-            if self.threshold == 'otsu':
-                # If it's the first image
-                if ii == 0:
-                    # Concatenate the blurred image with the last blurred image along the horizontal axis
-                    img_ext = np.concatenate( (img_gus, img_guses[-1]), axis=1, dtype=np.uint8)
-                    # Apply Otsu's binarization
-                    th, ret = cv2.threshold(img_ext, 0, 255, type_of_self + cv2.THRESH_OTSU)
-                    # Split the binarized image and keep the first half
-                    ret = np.split(ret, [img_ext.shape[1]//2], axis=1)[0]
-                    # Convert the image from grayscale to BGR and back to grayscale
-                    ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
-                    ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
-                else : 
-                    # Apply Otsu's binarization for the other images
-                    th, ret = cv2.threshold(img_gus, 0, 255, type_of_self + cv2.THRESH_OTSU)
-            else:
-                # Apply simple thresholding if the threshold attribute is not set to 'otsu'
-                th, ret = cv2.threshold(img_gus, self.threshold , 255, type_of_self)
-            
-            
-            # yield ret
-            # Append the binarized image to the list
-            bin_imgs.append(ret)
-            
-        # Return the list of binarized images
-        return bin_imgs
-        
-    def binarize(self, image):
-        """
-        This function binarizes an input image based on the instance's threshold and inverse attributes.
-    
-        Parameters:
-        image (np.array): The input image to be binarized. It should be a grayscale image.
-    
-        Returns:
-        ret (np.array): The binarized image.
-    
-        The function first applies a Gaussian blur to the image. Then, depending on the threshold attribute of the instance,
-        it applies Otsu's binarization or simple thresholding. If the inverse attribute is True, the binary image is inverted.
-        """
-        # Determine the type of thresholding to be applied based on the inverse attribute
-        type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
-    
-        # Apply Gaussian blur to the image
-        image_gus = cv2.GaussianBlur(image, (25,25),0)
-    
-        # Check if the threshold attribute is set to 'otsu'
-        if self.threshold == 'otsu':
-            
-            # Apply Otsu's binarization
-            th, ret = cv2.threshold(image_gus, 0, 255, type_of_self + cv2.THRESH_OTSU)
-            # # Convert the image from grayscale to BGR and back to grayscale
-            # ret = cv2.cvtColor(ret, cv2.COLOR_GRAY2BGR)
-            # ret = cv2.cvtColor(ret, cv2.COLOR_BGR2GRAY)
-        else:
-            # Apply simple thresholding if the threshold attribute is not set to 'otsu'
-            th, ret = cv2.threshold(image_gus, self.threshold , 255, type_of_self)
-    
-        # Return the binarized image
-        return ret
-
-
-        
     
 class Meas_Type_cli():
     
