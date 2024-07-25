@@ -4,8 +4,10 @@ Created on Thu Apr  6 17:06:11 2023
 
 @author: Rakhul Raj
 """
-from typing import TYPE_CHECKING
+# from typing import TYPE_CHECKING
 import cv2
+import sys
+from numba import njit
 import numpy as np
 import pandas as pd
 import pathlib
@@ -21,16 +23,25 @@ from PyQt5.QtCore import Qt, QPoint
 
 # if TYPE_CHECKING:
 from typing import Tuple, List, Any, TypeVar
-from main import Meas_Type
 from PyQt5.QtWidgets import QWidget
 # import numpy.typing as npt
 
-# Define custom types
-GrayImage = TypeVar('GrayImage', bound= np.ndarray[Tuple[Any, Any], np.uint8])
-BGRImage = TypeVar('BGRImage', bound= np.ndarray[Tuple[Any, Any, 3], np.uint8])
-Image = TypeVar('Image', bound= np.ndarray[Tuple[Any, Any, 0|3], np.uint8])
-Contour = TypeVar('Contour', bound= np.ndarray[Tuple[Any, 1, 2], np.uint8])
-# end
+if sys.version_info >= (3, 9):
+
+    # Define custom types
+    GrayImage = TypeVar('GrayImage', bound= np.ndarray[Tuple[Any, Any], np.uint8])
+    BGRImage = TypeVar('BGRImage', bound= np.ndarray[Tuple[Any, Any, 3], np.uint8])
+    Image = TypeVar('Image', bound= np.ndarray[Tuple[Any, Any, 0|3], np.uint8])
+    Contour = TypeVar('Contour', bound= np.ndarray[Tuple[Any, 1, 2], np.uint8])
+    # end
+else:
+    # Define custom types
+    GrayImage = TypeVar('GrayImage', bound= np.ndarray)
+    BGRImage = TypeVar('BGRImage', bound= np.ndarray)
+    Image = TypeVar('Image', bound= np.ndarray)
+    Contour = TypeVar('Contour', bound= np.ndarray)
+
+
 
 x5 = (500/188)
 x20 = (100/149)
@@ -52,6 +63,24 @@ cal = pd.read_csv(cal_file, delimiter ='\t', header = None, usecols = [0,1])
 # funcion for interpoting the magnetic field from voltage value
 # =============================================================================
 field = interp1d(cal[0], cal[1])
+
+class Meas_Type():
+    
+    def __init__(self, window):
+        
+        self.index = window.measurmentType.currentIndex()
+        self.center = window.center_select.text()
+        if self.center:
+            self.center = Point(*map(int, self.center.split(",")))
+            
+        # point2 is the first click and point1 is second click        
+        self.point2 = Point(window.linep1_x.value(), window.linep1_y.value())
+        self.point1 = Point(window.linep2_x.value(), window.linep2_y.value())
+        self.outline =  window.dial.value()
+        
+    def __eq__(self, other):
+        
+        return self.index == other
 
 # cli or code insert type of mesurementType and binarize
 class Binarize_Type():
@@ -223,7 +252,7 @@ def  find_volt(path: pathlib.Path):
     
     return a
 
-def get_edge(image : np.array, get_cordinates : bool = False) -> np.array:
+def get_edge(image : GrayImage, get_cordinates : bool = False) -> np.array:
     '''
     Take the image and give out image with edges or the coordinates of the edge
 
@@ -242,7 +271,7 @@ def get_edge(image : np.array, get_cordinates : bool = False) -> np.array:
     '''
     img1 = image
     # getting images with only edges
-    edges1 = cv2.Canny(img1, 200, 400)
+    edges1: GrayImage = cv2.Canny(img1, 200, 400)
     
     if get_cordinates:
         
@@ -250,7 +279,7 @@ def get_edge(image : np.array, get_cordinates : bool = False) -> np.array:
     else:
         return edges1
     
-def dw_select(image : np.array ) -> np.array:
+def dw_select(image : GrayImage ) -> GrayImage:
     '''
     
 
@@ -265,6 +294,7 @@ def dw_select(image : np.array ) -> np.array:
         DESCRIPTION.
 
     '''
+    contours1 : Contour ; hierarchy1: np.array
     contours1, hierarchy1 = cv2.findContours(image, 
                                              cv2.RETR_EXTERNAL, 
                                              cv2.CHAIN_APPROX_SIMPLE)
@@ -278,8 +308,9 @@ def dw_select(image : np.array ) -> np.array:
     
     return points
 
+@njit(cache = True)
 def image_from_coords(coords : np.array, 
-                      shape : tuple, new_image : np.array = None) -> np.array:
+                      shape : tuple, new_image : np.array = None) -> GrayImage:
     '''
     
 
@@ -311,10 +342,10 @@ def image_from_coords(coords : np.array,
         new_image[x[1],x[0]] = 1
         
     return new_image
-
+@njit(cache = True)
 def find_endpoints(edges : np.array, shape : Tuple) -> List[np.array]:
-    
-    endpoints = []
+    # not a good way to find endpoints for 
+    endpoints = [np.array([x], dtype = 'int32') for x in range(0)] # empty list
     
     ii = 0
     
@@ -328,6 +359,28 @@ def find_endpoints(edges : np.array, shape : Tuple) -> List[np.array]:
             break
         
     return endpoints
+
+
+# # new function to be implemented, testing is needed before implementation
+# # Function to find endpoints
+# def find_endpoints(edges : np.array, shape : Tuple) -> List[Tuple]:
+
+#     image : GrayImage = image_from_coords(edges, shape)
+#     image[image == 1] = 255
+#     # Skeletonize the edge-detected image
+#     skeleton = cv2.ximgproc.thinning(edges)
+
+#     # Find non-zero points in the skeleton
+#     points = np.argwhere(skeleton > 0)
+
+
+#     endpoints = []
+#     for point in points:
+#         y, x = point
+#         neighbors = skeleton[y-1:y+2, x-1:x+2]
+#         if np.sum(neighbors) == 2:  # Only one neighbor
+#             endpoints.append((x, y))
+#     return endpoints
     
 def ordered_edge(edges : np.array, shape : Tuple) -> np.array:
     '''
@@ -396,9 +449,9 @@ def ordered_edge(edges : np.array, shape : Tuple) -> np.array:
         
     return ordered_edges
 
-def dw_detect(image):
+def dw_detect(image: GrayImage):
     
-    edges1 = get_edge(image)
+    edges1 : GrayImage = get_edge(image)
     dw1 = dw_select(edges1)
     if dw1:
         ordered_dw = ordered_edge(dw1, image.shape)
@@ -757,7 +810,7 @@ def dt_curve(paths : pathlib.Path, voltage : str, measurmentType: Meas_Type, bin
     dta.sort_values(by = 'pulse_width', inplace = True)
     dta.reset_index(drop = True, inplace = True)
     return dta
-
+# @profile
 def calculate_motion(images, measurmentType: Meas_Type, binarize: Binarize_Type):
     
     point2 = measurmentType.point2

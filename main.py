@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
         self.dial.valueChanged.connect(self.outline_dial)
         self.genEdges.clicked.connect(self.add_edge)
         self.calcButton.clicked.connect(lambda : print(
-                                                        ps.calculate_motion(self.images, Meas_Type(self), 
+                                                        ps.calculate_motion(self.images, ps.Meas_Type(self), 
                                                                          ps.Binarize_Type.from_window(self)
                                                                          )
                                                         )
@@ -484,7 +484,7 @@ class MainWindow(QMainWindow):
         
         # creating a ne Meas_Type object. Advantage of this object is that if its bubble type domain
         # its easy to pass the center to the bdw_detect function
-        measurmentType = Meas_Type(window = self)    
+        measurmentType = ps.Meas_Type(window = self)    
         
         # selecting according to the type of measurements
         if measurmentType == 0:
@@ -558,7 +558,7 @@ class MainWindow(QMainWindow):
         volts= ps.find_volt(paths)
             
         arguments = dict(
-        measurmentType = Meas_Type(window = self),
+        measurmentType = ps.Meas_Type(window = self),
         binarize = ps.Binarize_Type.from_window(window = self))
 
             
@@ -584,7 +584,7 @@ class MainWindow(QMainWindow):
 
         
         arguments = dict(
-        measurmentType = Meas_Type(window = self),
+        measurmentType = ps.Meas_Type(window = self),
         binarize = ps.Binarize_Type.from_window(window = self))
         
         iter_path = [path for path in paths_parent.iterdir()]
@@ -660,7 +660,7 @@ class MainWindow(QMainWindow):
             # we only need the comment in the first line
             string= comments[0].replace('# ', '').replace(',  ', '\n')            
         else:            
-            mt = Meas_Type(window = self)
+            mt = ps.Meas_Type(window = self)
             bi = ps.Binarize_Type.from_window(window = self)
             
             string = f'''point2 : {mt.point2}
@@ -690,23 +690,7 @@ outline : {mt.outline}'''
         plt.show()
         
 
-class Meas_Type():
-    
-    def __init__(self, window):
-        
-        self.index = window.measurmentType.currentIndex()
-        self.center = window.center_select.text()
-        if self.center:
-            self.center = ps.Point(*map(int, self.center.split(",")))
-            
-        # point2 is the first click and point1 is second click        
-        self.point2 = ps.Point(window.linep1_x.value(), window.linep1_y.value())
-        self.point1 = ps.Point(window.linep2_x.value(), window.linep2_y.value())
-        self.outline =  window.dial.value()
-        
-    def __eq__(self, other):
-        
-        return self.index == other
+
     
 
  #%%   
