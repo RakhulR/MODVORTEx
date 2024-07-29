@@ -4,6 +4,7 @@ Created on Wed Mar  1 15:24:16 2023
 
 @author: Rakhul Raj
 """
+#%%
 import sys
 import re
 import os
@@ -25,7 +26,7 @@ from PyQt5.QtCore import QSize, QPoint, Qt
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence
 import numpy as np
 import icons
-from custom_widgets import MyLabel
+from custom_widgets import MyLabel, SettingWindow
 import processing as ps
 # iconSize = QSize(3000,3000)
 import multiprocessing
@@ -52,13 +53,13 @@ else:
     application_path = Path(os.path.dirname(os.path.abspath(__file__)))
 
 
-def do(volt, paths, out_path, measurmentType, binarize):
+def do(volt, paths, out_path, measType, binarize):
     
     out = ps.float_str(ps.field(float(volt)/10),2) + 'mT.txt'
     
-    dat = ps.dt_curve(paths, volt, measurmentType, binarize)
+    dat = ps.dt_curve(paths, volt, measType, binarize)
     
-    mt = measurmentType
+    mt = measType
     bi = binarize
     
     string = f'# point2 : {mt.point2},  point1 : {mt.point1},  DCenter : {mt.center},  Binarize : {bi.threshold},\
@@ -98,10 +99,10 @@ class MainWindow(QMainWindow):
             
         self.setButton.clicked.connect(self.set_direction)
         self.loadPointsButton.clicked.connect(self.def_direction)
-        self.dial.valueChanged.connect(self.outline_dial)
+        self.dial.valueChanged.connect(self.dial_changed)
         self.genEdges.clicked.connect(self.add_edge)
         self.calcButton.clicked.connect(lambda : print(
-                                                        ps.calculate_motion(self.images, ps.Meas_Type(self), 
+                                                        ps.calculate_motion_displace(self.images, ps.Meas_Type.from_window(self), 
                                                                          ps.Binarize_Type.from_window(self)
                                                                          )
                                                         )
@@ -115,7 +116,8 @@ class MainWindow(QMainWindow):
                                                              self.save_folder.text()                                                             
                                                              ))
         
-        
+        self.dselect_button.clicked.connect(self.auto_domain_select)
+        self.plt_histogram_b.clicked.connect(self.plt_hist)
         # Test
         # self.load_options.clicked.connect(lambda : print(type(self.tabWidget.widget(0))))
         # self.load_options.clicked.connect(lambda : print(self.tabWidget.widget(0).size()))
@@ -137,7 +139,11 @@ class MainWindow(QMainWindow):
         
         self.tabWidget.currentChanged.connect(lambda : self.update_th_label())
         # self.show()
-        
+
+        self.settings_win = SettingWindow(self)
+
+        self.load_settings.clicked.connect(self.settings_win.show)
+        self.load_settings.clicked.connect(self.settings_win.activateWindow)
         # images that are loaded in the tabs
         self.images = None
         # save the threshold value while binarizing
@@ -194,11 +200,14 @@ class MainWindow(QMainWindow):
             path = pathlib.Path(text)
             images =[* path.glob('*.png')][::1]
         
-            images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
+            # images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
+            measType =  ps.Meas_Type.from_window(self)
+            images = [ps.load_image(image, measType) for image in images]
             self.images = images
             images = [self.qimage_fromdata(image) for image in images]
             
-            tabs = [MyLabel() for _ in images]
+            tabs = [MyLabel(mainwindow= self) for _ in images]
+            [x.set_outline(self.dial.value()) for x in tabs]
             [label.resize(image.size().width(), image.size().height()) for label, image in zip(tabs,images)]
             [label.setMaximumSize(image.size().width(), image.size().height()) for label, image in zip(tabs,images)]
             [tab.setPixmap(QPixmap.fromImage(image))for tab, image in zip(tabs,images)]
@@ -215,8 +224,69 @@ class MainWindow(QMainWindow):
             tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
             
             [tab.setPixmap(QPixmap.fromImage(image))for tab, image in zip(tabs,images)]
-            
 
+    def auto_domain_select(self):
+
+        binarize = ps.Binarize_Type.from_window(self)
+        bin_imgs = binarize.binarize_list(images= self.images)
+
+        measType = ps.Meas_Type.from_window(window = self)
+        measType.index = ps.Meas_Type.BUBBLE_CIRCLE_FIT
+        measType.select_domain = False
+        motions = ps.cexpand_detect(bin_imgs, measType)
+        # print([x.centre for x in motions])
+        centres = [str(x.centre).replace(' ', '') for x in motions]
+        # print(centres)
+        centres_str = ';'.join(centres)
+
+        self.select_domain_line.setText(centres_str) 
+
+
+
+    def dial_changed(self, value):
+
+        # change the label in qlabel
+        self.label_dial.setText(f'Width\n({value})')
+
+        # Changes the outline in the line drawn on all the custom labels
+        tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
+        [tab.set_outline(value) for tab in tabs]
+
+    def update_position_label(self, x:str, y:str):
+        ''' Updates the position of mouse in MyLabel'''
+        self.coord_label.setText(f"Current Coordinates (pixels): ({x}, {y})")  # Update with the current coordinates
+
+    def plt_hist(self):
+
+        kernel = ps.Binarize_Type.from_window(window= self).kernel
+
+        ind = self.tabWidget.currentIndex()
+        if ind < len(self.images): # current tabs are image tabs
+            ps.plt_histogram(image= self.images[ind],threshold= self.spinBox.value(), blur_kernel= kernel )
+        else: # current tab is edge tab
+        
+            label: QLabel = self.tabWidget.widget(ind)
+            
+            pixmap: QPixmap = label.pixmap()
+
+            if pixmap:
+                qimage : QImage = pixmap.toImage()
+                image : np.array = ps.qimage_to_array(qimage= qimage)
+                if len(image.shape) == 3:
+                    if image.shape[2] == 3:
+                        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                        ps.plt_histogram(image= image, blur_kernel= kernel)
+                    elif image.shape[2] == 1:
+                        ps.plt_histogram(image= image.squeeze(), blur_kernel= kernel)
+                    else:
+                        raise ValueError(f"The image format is not recognized as RBG or Grayscale. shape is {image.shape}")
+                elif len(image.shape) == 2:
+                    ps.plt_histogram(image= image, blur_kernel= kernel)
+                else:
+                    raise ValueError(f"The image format is not recognized as RBG or Grayscale. shape is {image.shape}")
+            else:
+
+                raise RuntimeError("No pixmap available in the current tab")
         
     def update_th_label(self):
         "function to set the threshold label"
@@ -247,7 +317,7 @@ class MainWindow(QMainWindow):
             # data_img  = [self.qimage_to_numpy(image) for image in self.images]
             data_img  = self.images
             bin_type = ps.Binarize_Type.from_window(self)
-            if  bin_type == 1:
+            if  bin_type == ps.Binarize_Type.TYPE_OTSU:
                 
                 # binarized_img = [self.otsu_binarize(image) for image in data_img]
                 # this loop below merges the first images with the last image horizontally and take threshold and then 
@@ -296,7 +366,8 @@ class MainWindow(QMainWindow):
         '''define a function to convert NumPy array to QImage'''
         
         height, width = img.shape
-        qimg = QImage(img.data, width, height, QImage.Format_Grayscale8)
+        # qimg = QImage(img.data, width, height, QImage.Format_Grayscale8) # error was happening when i crop the width of the image
+        qimg = QImage(bytes(img.data), width, height, QImage.Format_Grayscale8)
         
         return qimg
     
@@ -330,7 +401,7 @@ class MainWindow(QMainWindow):
             next_index = (current_index - 1) % self.tabWidget.count()
             self.tabWidget.setCurrentIndex(next_index)
             
-    def otsu_binarize(self, image, binarize_type):
+    def otsu_binarize(self, image, binarize_type: ps.Binarize_Type):
         """
         take an image path as input and give binarized image, threshold image, contour as output
     
@@ -350,7 +421,7 @@ class MainWindow(QMainWindow):
     
         """
         img = image
-        img_gus = cv2.GaussianBlur(img, (25,25),0)
+        img_gus = cv2.GaussianBlur(img, binarize_type.kernel, 0)
         if binarize_type.inverse:
             
             th, ret = cv2.threshold(img_gus, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -365,7 +436,7 @@ class MainWindow(QMainWindow):
     
         return (ret, th , contour)
     
-    def custom_binarize(self, image, binarize_type):
+    def custom_binarize(self, image, binarize_type: ps.Binarize_Type):
         """
         take an image , threshold image, contour as output
     
@@ -385,15 +456,14 @@ class MainWindow(QMainWindow):
     
         """
 
-    
         img = image
-        img_gus = cv2.GaussianBlur(img, (25, 25),0)
+        img_gus = cv2.GaussianBlur(img, binarize_type.kernel, 0)
         if binarize_type.inverse:
     
             th, ret = cv2.threshold(img_gus, binarize_type.threshold, 255, cv2.THRESH_BINARY_INV)
             
         else :
-            
+
             th, ret = cv2.threshold(img_gus, binarize_type.threshold, 255, cv2.THRESH_BINARY)
             
         contour, hei = cv2.findContours(ret, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
@@ -452,26 +522,7 @@ class MainWindow(QMainWindow):
             else:
                 
                 [tab.set_line_points(None, None) for tab in tabs]
-            
 
-    def outline_dial(self, number):
-        '''
-        Changes the outline in the line drawn on Qlabel
-
-        Parameters
-        ----------
-        number : TYPE
-            DESCRIPTION.
-
-        Returns
-        -------
-        None.
-
-        '''
-        
-        tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
-        [tab.set_outline(number) for tab in tabs]
-     
       
     def add_edge(self):
         
@@ -484,16 +535,27 @@ class MainWindow(QMainWindow):
         
         # creating a ne Meas_Type object. Advantage of this object is that if its bubble type domain
         # its easy to pass the center to the bdw_detect function
-        measurmentType = ps.Meas_Type(window = self)    
-        
+        measType = ps.Meas_Type.from_window(window = self)
+
+        if measType == ps.Meas_Type.BUBBLE_CIRCLE_FIT:
+
+            motions = ps.cexpand_detect(bin_imgs, measType)
+            shape = self.images[0].shape
+            new_img = ps.image_from_coords(np.array([], dtype = 'int32').reshape(0, 0),shape) # Look here
+            for motion in motions:
+                [ps.image_from_coords(domain.contour.squeeze(), shape, new_img)  
+                 for domain in motion.domains]
+
         # selecting according to the type of measurements
-        if measurmentType == 0:
+        elif measType == ps.Meas_Type.BUBBLE_DIRECTIONAL:
             
             # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
-            dws = [ps.bdw_detect(image, measurmentType.center) for image in bin_imgs]
+            dws = [ps.bdw_detect(image, measType.center) for image in bin_imgs]
+
+            shape = self.images[0].shape
             # ploting the contour ie the domain wall to a black image of same shape
-            new_img = ps.image_from_coords(dws[0], self.images[0].shape)
-            [ps.image_from_coords(dw, self.images[0].shape,new_img) for dw in dws]
+            new_img = ps.image_from_coords(dws[0], shape)
+            [ps.image_from_coords(dw, shape, new_img) for dw in dws]
             
             # the output of ps.bdw_detect is a 2d array but contours are represented as 3d array with axis 1 has one 
             # so we are converting it into a 3d array for to be used by ps.mark_center
@@ -501,14 +563,14 @@ class MainWindow(QMainWindow):
             # making the center of each contour in the image
             [ps.mark_center(contour, new_img) for contour in dws_contours]
             
-        elif measurmentType == 1:
-            
+        elif measType == ps.Meas_Type.ARBITARY_STRUCTURE:
             
             # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
             # uses a edege detection
             dws = [ps.dw_detect(image) for image in bin_imgs]
-            new_img = ps.image_from_coords(dws[0], self.images[0].shape)
-            [ps.image_from_coords(dw, self.images[0].shape,new_img) for dw in dws]
+            shape = self.images[0].shape
+            new_img = ps.image_from_coords(dws[0], shape)
+            [ps.image_from_coords(dw, shape, new_img) for dw in dws]
    
             
             
@@ -519,8 +581,8 @@ class MainWindow(QMainWindow):
         new_img = new_img.astype(np.uint8)
         # new_img = cv2.cvtColor(new_img, cv2.COLOR_GRAY2RGB)
         
-        tab = MyLabel()
-        
+        tab = MyLabel(mainwindow= self)
+        tab.set_outline(self.dial.value()) # setting the outline value of mylabel
         # tab.setScaledContents(True)
         # tab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         image = self.qimage_fromdata(new_img)
@@ -558,8 +620,9 @@ class MainWindow(QMainWindow):
         volts= ps.find_volt(paths)
             
         arguments = dict(
-        measurmentType = ps.Meas_Type(window = self),
-        binarize = ps.Binarize_Type.from_window(window = self))
+                        measType = ps.Meas_Type.from_window(window = self),
+                        binarize = ps.Binarize_Type.from_window(window = self)
+                        )
 
             
         do_partial =  partial(do,paths = paths, out_path = out_path, **arguments)    
@@ -584,8 +647,9 @@ class MainWindow(QMainWindow):
 
         
         arguments = dict(
-        measurmentType = ps.Meas_Type(window = self),
-        binarize = ps.Binarize_Type.from_window(window = self))
+                        measType = ps.Meas_Type.from_window(window = self),
+                        binarize = ps.Binarize_Type.from_window(window = self)
+                        )
         
         iter_path = [path for path in paths_parent.iterdir()]
         
@@ -660,7 +724,7 @@ class MainWindow(QMainWindow):
             # we only need the comment in the first line
             string= comments[0].replace('# ', '').replace(',  ', '\n')            
         else:            
-            mt = ps.Meas_Type(window = self)
+            mt = ps.Meas_Type.from_window(window = self)
             bi = ps.Binarize_Type.from_window(window = self)
             
             string = f'''point2 : {mt.point2}
@@ -689,16 +753,17 @@ outline : {mt.outline}'''
 
         plt.show()
         
-
-
-    
+    # def closeEvent(self, event):
+    #     if self.settings is not None:
+    #         self.settings.close()
+    #     event.accept()
 
  #%%   
 if __name__ == '__main__':
     multiprocessing.freeze_support()
     # create an application object
     app = QApplication(sys.argv)
-    # create an example object
+    # create a mainwindow
     window = MainWindow()
     window.show()
     # [k for k in dir(window) if k not in dir(QMainWindow) and not k.startswith('__')]

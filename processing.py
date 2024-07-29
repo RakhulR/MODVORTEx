@@ -7,6 +7,7 @@ Created on Thu Apr  6 17:06:11 2023
 # from typing import TYPE_CHECKING
 import cv2
 import sys
+from dataclasses import dataclass
 from numba import njit
 import numpy as np
 import pandas as pd
@@ -18,11 +19,14 @@ from scipy.interpolate import interp1d
 from shapely.geometry import MultiPoint, GeometryCollection, MultiLineString
 from shapely.geometry import Point as Pnt
 from scipy.spatial import KDTree
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QByteArray
+from PyQt5.QtGui import QImage
+import matplotlib.pyplot as plt
 
+import bubble as bd
 
 # if TYPE_CHECKING:
-from typing import Tuple, List, Any, TypeVar
+from typing import Tuple, List, Any, TypeVar, Union
 from PyQt5.QtWidgets import QWidget
 # import numpy.typing as npt
 
@@ -64,28 +68,103 @@ cal = pd.read_csv(cal_file, delimiter ='\t', header = None, usecols = [0,1])
 # =============================================================================
 field = interp1d(cal[0], cal[1])
 
-class Meas_Type():
-    
-    def __init__(self, window):
+Point =  namedtuple('Point', ['x', 'y'])
+
+@dataclass
+class Settings:
         
-        self.index = window.measurmentType.currentIndex()
-        self.center = window.center_select.text()
-        if self.center:
-            self.center = Point(*map(int, self.center.split(",")))
+        scale: float
+        kernel: int
+        img_width: int
+        img_height: int
+   
+class Meas_Type:
+
+    BUBBLE_CIRCLE_FIT  = 2
+    BUBBLE_DIRECTIONAL = 0
+    ARBITARY_STRUCTURE = 1
+
+    
+    def __init__(self, 
+                 m_type : int,
+                 point2: Point = Point(0,0),
+                 point1: Point= Point(0,0), 
+                 outline: int = 1,
+                 center: Point = None, # for BUBBLE_DIRECTIONAL
+                 roundness: float = 1.3,  # for BUBBLE_CIRCLE_FIT
+                 select_domain: Union[List[Tuple[int]], bool] = False,# for BUBBLE_CIRCLE_FIT
+                 settings = None
+                 ):
+
+        self.index = m_type
+        self.center = center
+        self.point2 = point2
+        self.point1 = point1
+        self.outline = outline
+        self.roundness = roundness
+        self.select_domain = select_domain
+
+        if isinstance(settings , Settings):
+            self.settings = settings
+        else:    
+            self.settings = Settings(scale = x20, kernel = 25, img_width = 0, img_height = 512)
+
+    
+    @classmethod
+    def from_window(cls, window: QWidget):
+        
+        index = window.measType.currentIndex()
+        center = window.center_select.text()
+        if center:      
+            center = Point(*map(int, center.split(",")))
+        else:
+            center = None
             
         # point2 is the first click and point1 is second click        
-        self.point2 = Point(window.linep1_x.value(), window.linep1_y.value())
-        self.point1 = Point(window.linep2_x.value(), window.linep2_y.value())
-        self.outline =  window.dial.value()
+        point2 = Point(window.linep1_x.value(), window.linep1_y.value())
+        point1 = Point(window.linep2_x.value(), window.linep2_y.value())
+        outline =  window.dial.value()
+        scale =  1
+        roundness = window.roundness_box.value()
+        select_domain = window.select_domain_line.text()
+        if select_domain:
+            select_domain = [tuple(map(int, x.replace('(', '').replace(')', '').split(","))) 
+                             for x in select_domain.split(";")]
+        else:
+            select_domain = False
+
+        set_win  = window.settings_win
+
+        settings = Settings(**{key : set_win.__dict__[key] for key in set_win.key_list})
+
+        return cls(index, point2, point1, outline, center, roundness, select_domain, settings)
         
     def __eq__(self, other):
         
         return self.index == other
+    
+    def displacement(self, motions : List[ Union['Domain_mot', bd.B_Domain_mot]]):
+
+        if self == self.BUBBLE_CIRCLE_FIT:
+
+            distance = [x.displacement() for x in motions] 
+        
+        else:
+
+            lines = parallel_lines(self.point2, self.point1, self.outline)
+        
+            distance = [motions.distance(line) for line in lines]
+
+        return distance
+    
 
 # cli or code insert type of mesurementType and binarize
-class Binarize_Type():
+class Binarize_Type:
     
-    def __init__(self, threshold:int,  inverse:bool, threshold_value:int = 149):
+    TYPE_OTSU = 1
+    TYPE_CUSTOM = 0
+
+    def __init__(self, threshold_type:int,  inverse:bool = False, threshold_value:int = 149, kernel: Tuple = (25, 25)):
         """
         
 
@@ -108,25 +187,35 @@ class Binarize_Type():
         Binarize_Type_cli object.
 
         """
-        self.index = threshold
-        if threshold == 1:
+        self.index = threshold_type
+
+        if threshold_type == self.TYPE_OTSU:
+
             self.threshold = 'otsu'
-        elif threshold == 0:
+
+        elif threshold_type == self.TYPE_CUSTOM:
+
             self.threshold = threshold_value
         else:
             raise ValueError("threshold can only be 0 or 1 zero for custom and 1 for otsu")
         
-        self.inverse  = inverse
+        self.inverse = inverse
+
+        self.kernel = kernel
         
     @classmethod
     def from_window(cls, window: QWidget):
         index = window.b_combo_box.currentIndex()
-        if index == 1:
+        if index == cls.TYPE_OTSU:
             threshold = 'otsu'
         else:
             threshold = window.spinBox.value()
+
         inverse = window.inverse.isChecked()
-        return cls(index, inverse, threshold)
+
+        kernel_size = (window.settings_win.kernel,)*2
+
+        return cls(index, inverse, threshold, kernel_size)
         
     def __eq__(self, other):
         
@@ -152,7 +241,7 @@ class Binarize_Type():
         type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
         
         # Apply Gaussian blur to each image
-        img_guses = [ cv2.GaussianBlur(img, (25,25),0) for img in images ]
+        img_guses = [ cv2.GaussianBlur(img, self.kernel,0) for img in images ]
         
         # Iterate over each blurred image
         for ii, img_gus in enumerate(img_guses):
@@ -201,7 +290,7 @@ class Binarize_Type():
         type_of_self = cv2.THRESH_BINARY_INV if self.inverse else cv2.THRESH_BINARY
     
         # Apply Gaussian blur to the image
-        image_gus = cv2.GaussianBlur(image, (25,25),0)
+        image_gus = cv2.GaussianBlur(image, self.kernel, 0)
     
         # Check if the threshold attribute is set to 'otsu'
         if self.threshold == 'otsu':
@@ -252,7 +341,7 @@ def  find_volt(path: pathlib.Path):
     
     return a
 
-def get_edge(image : GrayImage, get_cordinates : bool = False) -> np.array:
+def get_edge(image : GrayImage, get_cordinates : bool = False) -> Union[np.array, GrayImage]:
     '''
     Take the image and give out image with edges or the coordinates of the edge
 
@@ -279,7 +368,7 @@ def get_edge(image : GrayImage, get_cordinates : bool = False) -> np.array:
     else:
         return edges1
     
-def dw_select(image : GrayImage ) -> GrayImage:
+def dw_select(image : GrayImage ) -> List[np.array]:
     '''
     
 
@@ -342,6 +431,7 @@ def image_from_coords(coords : np.array,
         new_image[x[1],x[0]] = 1
         
     return new_image
+
 @njit(cache = True)
 def find_endpoints(edges : np.array, shape : Tuple) -> List[np.array]:
     # not a good way to find endpoints for 
@@ -458,7 +548,6 @@ def dw_detect(image: GrayImage):
         
         return ordered_dw
 
-
 class Domain_mot():
     
     def __init__(self, walls, scale  = x20):
@@ -497,9 +586,9 @@ class Domain_mot():
             if x and y:
                 distance.append(np.sqrt((x.x - y.x)**2 + (x.y-y.y)**2 ) * self.scale)
                 b = True
-            elif i==0 or not b:
+            elif i==0 or not b: # try until a intersection
                 continue
-            else:
+            else: # if there is no intersection
                 break
             i=+1
         return distance
@@ -573,8 +662,6 @@ def get_pwidth(path: pathlib.Path) -> Tuple[float, str]:
 # part needed for dmi measurements
 
 
-Point =  namedtuple('Point', ['x', 'y'])
-
 
 def contour_center(contour):
     ''' find the center of a contour'''
@@ -631,6 +718,14 @@ def bdw_detect(image, center):
         c1 = np.array([])
     
     return c1.squeeze()
+
+def cexpand_detect(images,  measType: Meas_Type) -> List[bd.B_Domain_mot]:
+    """A wrapper over the analyse_image function"""
+    mt = measType
+    motions = bd.analyse_images(images, mt.settings.scale, mt.roundness, mt.select_domain )
+    motions.sort(key = lambda x : np.sqrt(np.sum((np.array(x.centre) - np.array(images[0].shape)[::-1]/2)**2)))
+    return motions
+
 #1 implementation remaining - color and radius
 def mark_center(contour, image, color = None, radius = 3):
     '''
@@ -658,7 +753,7 @@ def mark_center(contour, image, color = None, radius = 3):
     # drawing circle around the contour center
     cv2.circle(image, (center.x, center.y), 5, 255, -1)
 
-# def dt_curve(paths : pathlib.Path, voltage : str, measurmentType, binarize) -> pd.DataFrame:
+# def dt_curve(paths : pathlib.Path, voltage : str, measType, binarize) -> pd.DataFrame:
 #     '''
 #     Takes the parent path which contains the voltage measurements and returns 
 #     a displacement v/s pulse_width data
@@ -685,7 +780,7 @@ def mark_center(contour, image, color = None, radius = 3):
 #         images = [*path.glob('*.png')]
 #         pulse_width = get_pwidth(images[0])[0]
 #         images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-#         displacement = calculate_motion(images, measurmentType, binarize)
+#         displacement = calculate_motion(images, measType, binarize)
 #         displacement = [x for x in displacement if x]
 #         displacement = np.mean([np.mean(dis) for dis in displacement])
         
@@ -703,7 +798,7 @@ def mark_center(contour, image, color = None, radius = 3):
 #     dta1.reset_index(drop = True, inplace = True)
 #     return dta1
 
-def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, measurmentType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
+def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, measType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
     '''
     Takes the parent path which contains the voltage measurements and returns 
     a displacement v/s pulse_width data. it only considers the first pulse for the displacement measurement
@@ -733,7 +828,7 @@ def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, mea
         images = [*path.glob('*.png')]
         pulse_width = get_pwidth(images[0])[0]
         images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-        displacement = calculate_motion(images, measurmentType, binarize)
+        displacement = calculate_motion(images, measType, binarize)
         displacement = [x[0:1] for x in displacement if x]    # [0] here is for selecting the displacement from 1st intercetion
         displacement = np.array([x for y in displacement for x in y])
         
@@ -758,8 +853,26 @@ def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, mea
     dta.reset_index(drop = True, inplace = True)
     return dta
 
+def load_image(image_path: Union[pathlib.Path,str], measType : Meas_Type):
 
-def dt_curve(paths : pathlib.Path, voltage : str, measurmentType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
+    sett = measType.settings
+
+    width = sett.img_width
+    height = sett.img_height
+
+    image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+
+    if width == 0 and height == 0:
+        return image
+    elif width == 0:
+        return image[:height, :]
+    elif height == 0:
+        return image[:, :width]
+    else:
+        return image[:height, :width]
+
+
+def dt_curve(paths : pathlib.Path, voltage : str, measType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
     '''
     Takes the parent path which contains the voltage measurements and returns 
     a displacement v/s pulse_width data
@@ -785,8 +898,10 @@ def dt_curve(paths : pathlib.Path, voltage : str, measurmentType: Meas_Type, bin
         # print(path)
         images = [*path.glob('*.png')]
         pulse_width = get_pwidth(images[0])[0]
-        images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-        displacement = calculate_motion(images, measurmentType, binarize)
+        # images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
+        images = [load_image(image, measType) for image in images]
+        motions = calculate_motion(images, measType, binarize)
+        displacement = measType.displacement(motions)
         displacement = [x for x in displacement if x]
         displacement = np.array([x for y in displacement for x in y])
         
@@ -811,103 +926,90 @@ def dt_curve(paths : pathlib.Path, voltage : str, measurmentType: Meas_Type, bin
     dta.reset_index(drop = True, inplace = True)
     return dta
 # @profile
-def calculate_motion(images, measurmentType: Meas_Type, binarize: Binarize_Type):
-    
-    point2 = measurmentType.point2
-    point1 = measurmentType.point1
-    outline = measurmentType.outline
-
-    # bin_imgs = [self.binarize(image)[0] for image in images]
-    
-    bin_imgs = binarize.binarize_list(images= images)
-   
-    # selecting according to the type of measurements
-    if measurmentType == 0:
-        
-        # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
-        dws = [bdw_detect(image, measurmentType.center) for image in bin_imgs]
-        
-    elif measurmentType == 1:
-        
-        
-        # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
-        # uses a edege detection
-        dws = [dw_detect(image) for image in bin_imgs]
-    # to change scale for auto measurements change here 
-    motion = Domain_mot(dws, scale=x20)
-    
-    lines = parallel_lines(point2, point1, outline)
-    
-    distance = [motion.distance(line) for line in lines]
-
-    # distance = motion.distance([point2, point1,])
-
-    return distance
-
-# return the domain motion insted of the average displacement
-def calculate_domain_motion(images, measurmentType: Meas_Type, binarize: Binarize_Type):
-    
-    point2 = measurmentType.point2
-    point1 = measurmentType.point1
-    outline = measurmentType.outline
+def calculate_motion(images, measType: Meas_Type, binarize: Binarize_Type):
 
     # bin_imgs = [self.binarize(image)[0] for image in images]
     
     bin_imgs = binarize.binarize_list(images= images)
 
-    # selecting according to the type of measurements
-    if measurmentType == 0:
-        
-        # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
-        dws = [bdw_detect(image, measurmentType.center) for image in bin_imgs]
-        
-    elif measurmentType == 1:
-        
-        
-        # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
-        # uses a edege detection
-        dws = [dw_detect(image) for image in bin_imgs]
-    # to change scale for auto measurements change here 
-    motion = Domain_mot(dws, scale=x20)
-    
+    # special check for circular domain expansion measurement using fitting a circle
+    if measType ==  Meas_Type.BUBBLE_CIRCLE_FIT:
+
+        motion = cexpand_detect(bin_imgs, measType)
+
+    else:
+
+        # selecting according to the type of measurements
+        if measType == Meas_Type.BUBBLE_DIRECTIONAL:
+            
+            # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
+            dws = [bdw_detect(image, measType.center) for image in bin_imgs]
+            
+        elif measType == Meas_Type.ARBITARY_STRUCTURE:
+            
+            # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
+            # uses a edege detection
+            dws = [dw_detect(image) for image in bin_imgs]
+        # to change scale for auto measurements change here 
+
+        motion = Domain_mot(dws, scale= measType.settings.scale)
+
     return motion
+def calculate_motion_displace(images, measType: Meas_Type, binarize: Binarize_Type):
+
+    motions = calculate_motion(images, measType, binarize)
+    displacement = measType.displacement(motions)
+
+    return displacement
 
 
+def plt_histogram(image: GrayImage, threshold = None, blur_kernel: Union[Tuple, None] = None):
+
+    if blur_kernel is None:
+        img_gus = image
+    else:
+        img_gus = cv2.GaussianBlur(image, blur_kernel,0)
+
+    hist = np.array(cv2.calcHist([img_gus],[0],None,[256],[0,256]))
+    # hist[hist != 0] = np.log(hist[hist != 0] )
+    plt.plot(hist)
+
+    if threshold is not None:
+        plt.plot([threshold]*100, (np.linspace(0,60000,100)))
+    plt.draw()
+    plt.show()
+
+def qimage_to_array(qimage: QImage) -> np.ndarray:
+    """
+    Converts a QImage to a NumPy array.
+
+    Parameters:
+    qimage (QImage): The input QImage to be converted.
+
+    Returns:
+    np.ndarray: A NumPy array representing the image data.
+                The shape of the array will be (height, width, channels),
+                where channels can be 1 (grayscale), 3 (RGB), or 4 (RGBA).
+    """
+    width: int = qimage.width()
+    height: int = qimage.height()
     
-class Meas_Type_cli():
+    # Determine the number of channels
+    if qimage.isGrayscale():
+        channels: int = 1
+    else:
+        channels: int = 4 if qimage.hasAlphaChannel() else 3
     
-    def __init__(self, mtype:int, point2:Point, point1:Point, outline:int, 
-                 center:Point = Point(371,278)):
-        """
-        
+    # Access the raw pixel data
+    ptr: QByteArray = qimage.bits()
+    
+    # Set the size of the byte array
+    ptr.setsize(height * width * channels)
+    
+    # Convert the byte array to a NumPy array and reshape it
+    arr: np.ndarray = np.array(ptr).reshape(height, width, channels)
+    
+    return arr
 
-        Parameters
-        ----------
-        mtype : int
-            0 for closed domain, 1 for random shape.
-        point2 : ps.Point
-            first click point of the straight line.
-        point1 : ps.Point
-            2nd click point of the straight line.
-        outline : int
-            spread of the line, 3.
-        center : ps.Point, optional
-            DESCRIPTION. The default is ps.Point(371,278).
-
-        Returns
-        -------
-        None.
-
-        """
-        
-        self.index = mtype
-        # point2 is the first click and point1 is second click        
-        self.point2 = point2
-        self.point1 = point1
-        self.outline =  outline
-        self.center = center
-        
-    def __eq__(self, other):
-        
-        return self.index == other
+     
     
