@@ -107,13 +107,13 @@ class B_Domain_mot():
 
             pass
 
-    def distance(self, domain: B_Domain):
+    def distance(self, domain: B_Domain) -> float:
 
         p1 = np.array(self.centre)
         p2 = np.array(domain.centre)
         return np.sqrt(np.sum(np.square(p1-p2)))
 
-    def displacement(self):
+    def displacement(self)-> List[float]:
 
         radius = [cv2.minEnclosingCircle(d.contour)[1] for d in self.domains]
 

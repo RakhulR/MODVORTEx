@@ -22,27 +22,17 @@
      <rect>
       <x>710</x>
       <y>34</y>
-      <width>293</width>
+      <width>291</width>
       <height>157</height>
      </rect>
     </property>
     <layout class="QGridLayout" name="gridLayout_3">
      <item row="2" column="2">
-      <widget class="QPushButton" name="load">
-       <property name="text">
-        <string>Load</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="1">
       <widget class="QPushButton" name="loadfolder">
        <property name="text">
-        <string>Select Folder</string>
+        <string>Select dir</string>
        </property>
       </widget>
-     </item>
-     <item row="1" column="0" colspan="3">
-      <widget class="QPlainTextEdit" name="textInputFolder"/>
      </item>
      <item row="2" column="0">
       <widget class="QPushButton" name="load_settings">
@@ -50,6 +40,23 @@
         <string>Settings</string>
        </property>
       </widget>
+     </item>
+     <item row="2" column="3">
+      <widget class="QPushButton" name="load">
+       <property name="text">
+        <string>Load</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QPushButton" name="img_viewer_b">
+       <property name="text">
+        <string>Img Viewer</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0" colspan="4">
+      <widget class="QPlainTextEdit" name="textInputFolder"/>
      </item>
     </layout>
    </widget>
@@ -1095,7 +1102,7 @@ exists</string>
      <property name="geometry">
       <rect>
        <x>40</x>
-       <y>50</y>
+       <y>40</y>
        <width>62</width>
        <height>22</height>
       </rect>
@@ -1114,7 +1121,7 @@ exists</string>
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>30</y>
+       <y>20</y>
        <width>71</width>
        <height>16</height>
       </rect>
@@ -1127,7 +1134,7 @@ exists</string>
      <property name="geometry">
       <rect>
        <x>0</x>
-       <y>110</y>
+       <y>100</y>
        <width>131</width>
        <height>22</height>
       </rect>
@@ -1155,7 +1162,7 @@ exists</string>
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>90</y>
+       <y>80</y>
        <width>91</width>
        <height>16</height>
       </rect>
@@ -1168,13 +1175,26 @@ exists</string>
      <property name="geometry">
       <rect>
        <x>20</x>
-       <y>150</y>
+       <y>130</y>
        <width>93</width>
        <height>28</height>
       </rect>
      </property>
      <property name="text">
       <string>Auto select </string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="show_domain_fit">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>160</y>
+       <width>93</width>
+       <height>28</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Show Fit</string>
      </property>
     </widget>
    </widget>
@@ -1197,6 +1217,19 @@ exists</string>
      <bool>true</bool>
     </property>
    </widget>
+   <widget class="QPushButton" name="api_button">
+    <property name="geometry">
+     <rect>
+      <x>810</x>
+      <y>200</y>
+      <width>93</width>
+      <height>28</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Start API</string>
+    </property>
+   </widget>
    <zorder>groupBox</zorder>
    <zorder>gridLayoutWidget_2</zorder>
    <zorder>tableView</zorder>
@@ -1214,6 +1247,7 @@ exists</string>
    <zorder>groupBox_3</zorder>
    <zorder>groupBox_4</zorder>
    <zorder>label_11</zorder>
+   <zorder>api_button</zorder>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">

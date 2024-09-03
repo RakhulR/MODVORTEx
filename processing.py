@@ -146,14 +146,14 @@ class Meas_Type:
     def displacement(self, motions : List[ Union['Domain_mot', bd.B_Domain_mot]]):
 
         if self == self.BUBBLE_CIRCLE_FIT:
-
-            distance = [x.displacement() for x in motions] 
+            
+            distance: List[List[float]] = [x.displacement() for x in motions] 
         
         else:
 
             lines = parallel_lines(self.point2, self.point1, self.outline)
         
-            distance = [motions.distance(line) for line in lines]
+            distance: List[List[float]] = [motions.distance(line) for line in lines]
 
         return distance
     
@@ -341,7 +341,7 @@ def  find_volt(path: pathlib.Path):
     
     return a
 
-def get_edge(image : GrayImage, get_cordinates : bool = False) -> Union[np.array, GrayImage]:
+def get_edge_single(image : GrayImage, get_cordinates : bool = False) -> Union[np.array, GrayImage]:
     '''
     Take the image and give out image with edges or the coordinates of the edge
 
@@ -399,7 +399,7 @@ def dw_select(image : GrayImage ) -> List[np.array]:
 
 @njit(cache = True)
 def image_from_coords(coords : np.array, 
-                      shape : tuple, new_image : np.array = None) -> GrayImage:
+                      shape : tuple, new_image : np.ndarray = None) -> GrayImage:
     '''
     
 
@@ -541,7 +541,7 @@ def ordered_edge(edges : np.array, shape : Tuple) -> np.array:
 
 def dw_detect(image: GrayImage):
     
-    edges1 : GrayImage = get_edge(image)
+    edges1 : GrayImage = get_edge_single(image)
     dw1 = dw_select(edges1)
     if dw1:
         ordered_dw = ordered_edge(dw1, image.shape)
@@ -555,7 +555,7 @@ class Domain_mot():
         self.walls = walls
         self.scale = scale
         
-    def get_intersect(self, line):
+    def get_intersect(self, line: Point):
         
         dws = self.walls
         asline = [lstr(x) for x in dws]
@@ -569,31 +569,27 @@ class Domain_mot():
     
     # distance = [np.sqrt((x.x - y.x)**2 + (x.y-y.y)**2 ) for x, y in zip(intersect[:-1], intersect[1:])]
     
-    def distance(self, line):
+    def distance(self, line: Point)-> List[float]:
         
         intersect = self.get_intersect(line)  
-        distance  = []
-        # intersect= [list(x.geoms)[0] if isinstance(x, MultiPoint) else x  for x in intersect]
-        intersect= [list(x.geoms)[0] if isinstance(x, GeometryCollection) else x  for x in intersect]
-        intersect= [list(x.geoms)[0] if isinstance(x, MultiLineString) else x  for x in intersect]
-        intersect= [list(x.geoms)[0] if isinstance(x, MultiPoint) else Pnt(x.coords[0]) if isinstance(x, lstr) and x  else x  
-                    for x in intersect ]
-        # intersect= [list(x.geoms)[0] if not isinstance(x, Pnt) else x  for x in intersect]
-        i = 0
-        b = False
-        for x, y in zip(intersect[:-1], intersect[1:]):
-            
-            if x and y:
-                distance.append(np.sqrt((x.x - y.x)**2 + (x.y-y.y)**2 ) * self.scale)
-                b = True
-            elif i==0 or not b: # try until a intersection
-                continue
-            else: # if there is no intersection
-                break
-            i=+1
-        return distance
+        result = []
+        for x in intersect:
+            if isinstance(x, (GeometryCollection, MultiLineString, MultiPoint)):
+                first_point = list(x.geoms)[0].coords[0]
+                result.append(np.array([first_point[0], first_point[1]]))
+            elif isinstance(x, (lstr, Pnt)):
+                if x :
+                    first_point = x.coords[0]
+                    result.append(np.array([first_point[0], first_point[1]]))
+                else:
+                    result.append(np.array([np.nan, np.nan]))
+            else:
+                result.append(np.array([np.nan, np.nan]))
+        result = np.array(result)
+        distance : np.ndarray =  np.linalg.norm(np.diff(result, axis=0), axis=1)*self.scale
+        return distance.tolist()
     
-def parallel_lines(point2, point1, outline):
+def parallel_lines(point2 : Point, point1: Point, outline: int):
     
     
     x2 = point2.x
@@ -723,7 +719,7 @@ def cexpand_detect(images,  measType: Meas_Type) -> List[bd.B_Domain_mot]:
     """A wrapper over the analyse_image function"""
     mt = measType
     motions = bd.analyse_images(images, mt.settings.scale, mt.roundness, mt.select_domain )
-    motions.sort(key = lambda x : np.sqrt(np.sum((np.array(x.centre) - np.array(images[0].shape)[::-1]/2)**2)))
+    motions.sort(key = lambda x : np.linalg.norm((np.array(x.centre) - np.array(images[0].shape)[::-1]/2)))
     return motions
 
 #1 implementation remaining - color and radius
@@ -845,8 +841,8 @@ def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, mea
     
         if displacement.size > 0:
     
-            disp = displacement.mean()
-            std = displacement.std()
+            disp = np.nanmean(displacement)
+            std = np.nanstd(displacement)
             dta.loc[len(dta)] = [pulse_width, disp, std]
     
     dta.sort_values(by = 'pulse_width', inplace = True)
@@ -860,7 +856,7 @@ def load_image(image_path: Union[pathlib.Path,str], measType : Meas_Type):
     width = sett.img_width
     height = sett.img_height
 
-    image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    image : GrayImage = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
 
     if width == 0 and height == 0:
         return image
@@ -870,6 +866,61 @@ def load_image(image_path: Union[pathlib.Path,str], measType : Meas_Type):
         return image[:, :width]
     else:
         return image[:height, :width]
+    
+def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
+
+    ''' get a edge image'''
+    # if self.b_combo_box.currentIndex() == 1:
+    #     binarize = self.otsu_binarize
+    # else:
+    #     binarize = lambda image : self.custom_binarize(image, self.spinBox.value())
+    
+    bin_imgs = binarize.binarize_list(images= images)
+    
+    # creating a ne Meas_Type object. Advantage of this object is that if its bubble type domain
+    # its easy to pass the center to the bdw_detect function
+
+    if measType == Meas_Type.BUBBLE_CIRCLE_FIT:
+
+        motions = cexpand_detect(bin_imgs, measType)
+        shape = images[0].shape
+        new_img = image_from_coords(np.array([], dtype = 'int32').reshape(0, 0),shape) # Look here
+        for motion in motions:
+            [image_from_coords(domain.contour.squeeze(), shape, new_img)  
+                for domain in motion.domains]
+
+    # selecting according to the type of measurements
+    elif measType == Meas_Type.BUBBLE_DIRECTIONAL:
+        
+        # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
+        dws = [bdw_detect(image, measType.center) for image in bin_imgs]
+
+        shape = images[0].shape
+        # ploting the contour ie the domain wall to a black image of same shape
+        new_img = image_from_coords(dws[0], shape)
+        [image_from_coords(dw, shape, new_img) for dw in dws]
+        
+        # the output of ps.bdw_detect is a 2d array but contours are represented as 3d array with axis 1 has one 
+        # so we are converting it into a 3d array for to be used by ps.mark_center
+        dws_contours = [np.expand_dims(array, axis=1) for array in dws]
+        # making the center of each contour in the image
+        [mark_center(contour, new_img) for contour in dws_contours]
+        
+    elif measType == Meas_Type.ARBITARY_STRUCTURE:
+        
+        # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
+        # uses a edege detection
+        dws = [dw_detect(image) for image in bin_imgs]
+        shape = images[0].shape
+        new_img = image_from_coords(dws[0], shape)
+        [image_from_coords(dw, shape, new_img) for dw in dws]
+
+        
+    new_img[new_img > 0] = 255
+    new_img = new_img.astype(np.uint8)
+
+    return new_img
+
 
 
 def dt_curve(paths : pathlib.Path, voltage : str, measType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
@@ -918,8 +969,8 @@ def dt_curve(paths : pathlib.Path, voltage : str, measType: Meas_Type, binarize:
     
         if displacement.size > 0:
     
-            disp = displacement.mean()
-            std = displacement.std()
+            disp = np.nanmean(displacement)
+            std =  np.nanstd(displacement)
             dta.loc[len(dta)] = [pulse_width, disp, std]
     
     dta.sort_values(by = 'pulse_width', inplace = True)
