@@ -103,7 +103,7 @@ class ImageProcessor(QMainWindow):
         if folder:
             self.set_folder(folder= folder)
     
-    def set_folder(self, folder : Union[str|Path]):
+    def set_folder(self, folder : Union[str, Path]):
             
         folder_path = Path(folder).parent
         self.folders = sorted([f for f in folder_path.iterdir() if f.is_dir() and f.name[0].isdigit()], key=self.sort_key)
