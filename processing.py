@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import bubble as bd
 
 # if TYPE_CHECKING:
-from typing import Tuple, List, Any, TypeVar, Union
+from typing import Tuple, List, Any, TypeVar, Union, Callable
 from PyQt5.QtWidgets import QWidget
 # import numpy.typing as npt
 
@@ -50,23 +50,6 @@ else:
 x5 = (500/188)
 x20 = (100/149)
 
-file_list: List[pathlib.Path]= []
-file_list.append(pathlib.Path(r'E:\Data\Rakhul\Domain Motion\V_Field_PCoil.txt'))
-file_list.append(pathlib.Path(r'\\USER-PC\Data\Rakhul\Domain Motion\V_Field_PCoil.txt'))
-file_list.append(pathlib.Path(r'D:\Lab Data\Domain Motion\V_Field_PCoil.txt'))
-
-for cal_file in file_list:
-    if cal_file.exists():
-        break
-if not cal_file.exists():
-    raise FileNotFoundError('Calibration File Not Found')
-
-cal = pd.read_csv(cal_file, delimiter ='\t', header = None, usecols = [0,1])
-
-# =============================================================================
-# funcion for interpoting the magnetic field from voltage value
-# =============================================================================
-field = interp1d(cal[0], cal[1])
 
 Point =  namedtuple('Point', ['x', 'y'])
 
@@ -333,10 +316,17 @@ def  find_volt(path: pathlib.Path):
 
     '''
     a = []
-    for x in path.glob('[0-9]*'):
-        name = x.name.split('_')[0][:-1]
-        if not name in a:
-            a.append(name)
+    pattern = re.compile(r'^[+-]?\d+(\.\d+)?')
+
+    for x in path.iterdir():
+
+        if pattern.match(x.name) and x.is_dir():
+
+            name = x.name.split('_')[0][:-1]
+
+            if not name in a:
+                a.append(name)
+                
     a.sort(key = lambda x : float(x))
     
     return a
@@ -820,7 +810,7 @@ def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, mea
     dta = pd.DataFrame(columns = ['pulse_width', 'displacement', 'std'])
     data = {}
     for path in list(paths.glob(f'{voltage}V*')):
-        # print(path)
+        
         images = [*path.glob('*.png')]
         pulse_width = get_pwidth(images[0])[0]
         images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
@@ -921,9 +911,21 @@ def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
 
     return new_img
 
+def sort_key(folder: pathlib.Path):
+    'sort key that seprates starting float and ending integer from a folder path'
+    name =  folder.name
+    parts = []
+    parts.append(re.match(r'^[+-]?\d+(\.\d+)?', name))
+    mat = re.search(r'_(\d+)$', name)
+    parts.append(int(mat.group(1)) if mat else 0) 
 
+    if parts[0] is None:
+        raise ValueError('Folder name Do_not match for folder: {}'.format(str(folder)))
+    parts[0] = float(parts[0].group())
 
-def dt_curve(paths : pathlib.Path, voltage : str, measType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
+    return tuple(parts)
+
+def dt_curve(paths : List[pathlib.Path], voltage : str, measType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
     '''
     Takes the parent path which contains the voltage measurements and returns 
     a displacement v/s pulse_width data
@@ -945,7 +947,8 @@ def dt_curve(paths : pathlib.Path, voltage : str, measType: Meas_Type, binarize:
         
     dta = pd.DataFrame(columns = ['pulse_width', 'displacement', 'std'])
     data = {}
-    for path in list(paths.glob(f'{voltage}V*')):
+
+    for path in paths:
         # print(path)
         images = [*path.glob('*.png')]
         pulse_width = get_pwidth(images[0])[0]

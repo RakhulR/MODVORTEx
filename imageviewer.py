@@ -4,6 +4,7 @@ Created on Sat May 20 09:11:45 2023
 
 @author: Rakhul Raj
 """
+import re
 import sys
 from pathlib import Path
 import time
@@ -104,14 +105,18 @@ class ImageProcessor(QMainWindow):
             self.set_folder(folder= folder)
     
     def set_folder(self, folder : Union[str, Path]):
-            
+
+        # pattern for a number in the beginning
+        pattern = re.compile(r'^[+-]?\d+(\.\d+)?')
+
         folder_path = Path(folder).parent
-        self.folders = sorted([f for f in folder_path.iterdir() if f.is_dir() and f.name[0].isdigit()], key=self.sort_key)
+
+        self.folders = sorted([f for f in folder_path.iterdir() if f.is_dir() and pattern.match(f.name)], key=ps.sort_key)
         if self.folders:
-            current_values = self.sort_key(Path(folder))
+            current_values = ps.sort_key(Path(folder))
             # loading the images from selected folder, in case if no folder is found the 1st folder is selected
             for ii, folder in enumerate(self.folders):
-                if current_values == self.sort_key(folder):
+                if current_values == ps.sort_key(folder):
                     self.current_folder_index = ii
                     break
             else:
@@ -119,15 +124,21 @@ class ImageProcessor(QMainWindow):
 
             self.load_images()
 
-    def sort_key(self, folder):
+    def sort_key(self, folder: Path): # going to be depreciated in the future versions
+        
         name = folder.name
         parts = name.split('_')
+        parts[0] = re.match(r'^[+-]?\d+(\.\d+)?', parts[0]).group()
+
+        if parts[0] is None:
+            raise ValueError('Folder Names Do_not match for folder {}'.format(str(folder)))
+        
         if len(parts) == 2:
             try:
                 return (float(parts[0][:-1]), int(parts[1]))
             except ValueError:
                 pass
-
+        
         return (float(parts[0][:-1]), 0)
 
     def load_images(self):
@@ -186,19 +197,19 @@ class ImageProcessor(QMainWindow):
             self.load_images()
 
     def skip_forward(self):
-        current_value = self.sort_key(self.folders[self.current_folder_index])
+        current_value = ps.sort_key(self.folders[self.current_folder_index])
 
         for i in range(self.current_folder_index + 1, len(self.folders)):
-            first, second = self.sort_key(self.folders[i])
+            first, second = ps.sort_key(self.folders[i])
             if first > current_value[0] and second == current_value[1]:
                 self.current_folder_index = i
                 self.load_images()
                 return
         else:
 
-            if current_value[0] == self.sort_key(self.folders[-1])[0]:
+            if current_value[0] == ps.sort_key(self.folders[-1])[0]:
                 for ii, folders in enumerate(self.folders):
-                    first, second = self.sort_key(folders)
+                    first, second = ps.sort_key(folders)
                     # print('current value:', current_value, ' other:', (first, second ))
                     if current_value[1] == second:
                         self.current_folder_index = ii
@@ -210,11 +221,11 @@ class ImageProcessor(QMainWindow):
                self.skip_forward()
 
     def skip_backward(self):
-        current_value = self.sort_key(self.folders[self.current_folder_index])
+        current_value = ps.sort_key(self.folders[self.current_folder_index])
 
         if self.current_folder_index != 0 :
             for i in range(self.current_folder_index - 1, -1, -1):
-                first, second = self.sort_key(self.folders[i])
+                first, second = ps.sort_key(self.folders[i])
                 if first < current_value[0] and second == current_value[1]:
                     self.current_folder_index = i
                     self.load_images()
@@ -295,5 +306,6 @@ class ImageProcessor(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = decorate_all_methods(exception_handler)(ImageProcessor)()
+    # ex = ImageProcessor()
     ex.show()
     sys.exit(app.exec_())

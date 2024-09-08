@@ -12,7 +12,7 @@ from multiprocessing import Pool
 from threading import Thread
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 from typing import TypeVar, Tuple, Any, List
 
 import pandas as pd
@@ -72,7 +72,7 @@ else:
 class PoolManager:
     def __init__(self, num_workers):
         self.num_workers = num_workers
-        self.pool : MPPool = None
+        self.pool : Union[MPPool, None] = None
 
     def start(self):
         if self.pool is None:
@@ -92,20 +92,30 @@ class PoolManager:
             self.pool = None
 
 def do(volt, paths, out_path, measType, binarize):
+
+    sel_paths: List[Path] = [dirs for dirs in paths.iterdir() if re.match(rf'^{volt}\D+', dirs.name) and dirs.is_dir()]
+    sel_paths.sort(key = ps.sort_key)
     
-    out = ps.float_str(ps.field(float(volt)/10),2) + 'mT.txt'
+    # extracting the unit of the folders in which images are found
+    unit = re.findall(r'[^0-9.]+', sel_paths[0].name)
+    unit = unit[0] if unit else ""
+    unit = unit[:-1] if unit.endswith('_') else unit 
+
+    # defining the output filename
+    out =  volt + f"{unit}.txt"
     
-    dat = ps.dt_curve(paths, volt, measType, binarize)
+    dat = ps.dt_curve(sel_paths, volt, measType, binarize)
     
     mt = measType
     bi = binarize
     
     string = f'# point2 : {mt.point2},  point1 : {mt.point1},  DCenter : {mt.center},  Binarize : {bi.threshold},\
-  outline : {mt.outline}\n'
+outline : {mt.outline}\n'
         
     with open(out_path/out, 'w') as f:
         f.write(string)
     dat.to_csv(out_path/out, mode = 'a',  sep = '\t', index = False)
+
 
 class Worker(imageviewer.Worker):
 
@@ -428,7 +438,7 @@ class MainWindow(QMainWindow):
 
             if pixmap:
                 qimage : QImage = pixmap.toImage()
-                image : np.array = ps.qimage_to_array(qimage= qimage)
+                image : np.ndarray = ps.qimage_to_array(qimage= qimage)
                 if len(image.shape) == 3:
                     if image.shape[2] == 3:
                         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -739,7 +749,7 @@ class MainWindow(QMainWindow):
                         )
 
             
-        do_partial =  partial(do,paths = paths, out_path = out_path, **arguments)    
+        do_partial =  partial(do, paths = paths, out_path = out_path, **arguments)    
         # with Pool(4) as p:
 
         #     results = p.map(do_partial, volts)    
@@ -828,7 +838,7 @@ class MainWindow(QMainWindow):
                     results = p.map(do_partial, volts)    
                     
                     
-    def plot(self,path):
+    def plot(self, path: Union[str, Path]):
         '''
         Plot the data in the current save folder
         Parameters
@@ -841,7 +851,8 @@ class MainWindow(QMainWindow):
         None.
 
         '''
-        pattern = re.compile(r"\d+\.\d+mT\.txt")
+        # pattern = re.compile(r"\d+\.\d+mT\.txt")
+        pattern = re.compile(r'^[+-]?\d+(\.\d+)?\D+')
         
         
         path = Path(path)
@@ -850,7 +861,7 @@ class MainWindow(QMainWindow):
         
         fig, ax = plt.subplots()
         # sorting the files according to the field value
-        files.sort(key = lambda x: float(x.name.split('m')[0]))
+        files.sort(key = lambda x: float(re.match(r'^[+-]?\d+(\.\d+)?', x.name).group()))
         
         # to read the comment character from the first file
         
@@ -921,7 +932,11 @@ outline : {mt.outline}'''
 
     def closeEvent(self, event):
         if self.img_viewer is not None:
-            self.img_viewer.close()
+            if self.img_viewer.isVisible():
+                self.img_viewer.close()
+            else:
+                self.img_viewer = None
+
         self.pool.terminate()
         self.stop_api()
         event.accept()
