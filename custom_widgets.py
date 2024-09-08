@@ -172,7 +172,6 @@ class Modvortex_ImageProcessor(imageviewer.ImageProcessor):
         self.mainwindow.textInputFolder.setPlainText(str(self.start_path))
         self.mainwindow.load_images()
         super().closeEvent(event)
-        self.mainwindow.img_viewer_b.setEnabled(True)
         
     
 
@@ -251,12 +250,10 @@ class MainWindow(QMainWindow):
         # self.show()
 
         self.img_viewer = None
-        self.img_viewer_b.clicked.connect(self.open_img_viewer)
+
 
         self.settings_win = SettingWindow(self)
 
-        self.load_settings.clicked.connect(self.settings_win.show)
-        self.load_settings.clicked.connect(self.settings_win.activateWindow)
 
         self.actionAbout.triggered.connect(self.show_about_dialog)
         self.actionSettings.triggered.connect(self.settings_win.show)
@@ -284,10 +281,10 @@ class MainWindow(QMainWindow):
         self.api_button.clicked.connect(self.toggle_api)
 
     def show_about_dialog(self):
-        QMessageBox.about(self, "About", "Program Written By Rakhul Raj \nIf this program is helpful in your work please cite our article")
+        QMessageBox.about(self, "About", "Program Written By Rakhul Raj \nIf this program is helpful in your work, please cite our article")
 
     def open_docs(self):
-        QDesktopServices.openUrl(QUrl("https://www.github.com"))
+        QDesktopServices.openUrl(QUrl("https://github.com/RakhulR/MODVORTEx"))
 
 
     def loadfolder_f(self):
@@ -928,13 +925,11 @@ outline : {mt.outline}'''
             if self.img_viewer.isVisible():
                 self.img_viewer.show()
             else:
-                self.img_viewer_b.setEnabled(False)
                 self.img_viewer = Modvortex_ImageProcessor(parent= self,
                                                         worker= Worker)
                 self.img_viewer.show()
         else:
 
-            self.img_viewer_b.setEnabled(False)
             self.img_viewer = Modvortex_ImageProcessor(parent= self,
                                                     worker= Worker)
             self.img_viewer.show()
