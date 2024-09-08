@@ -32,8 +32,8 @@ from PyQt5.QtWidgets import (QMainWindow,
                              QDialog
     )
 from PyQt5 import uic
-from PyQt5.QtCore import QSize, QPoint, Qt
-from PyQt5.QtGui import QImage, QPixmap, QKeySequence
+from PyQt5.QtCore import QSize, QPoint, Qt, QUrl
+from PyQt5.QtGui import QImage, QPixmap, QKeySequence, QDesktopServices
 # iconSize = QSize(3000,3000)
 # from werkzeug.serving import make_server
 
@@ -257,6 +257,14 @@ class MainWindow(QMainWindow):
 
         self.load_settings.clicked.connect(self.settings_win.show)
         self.load_settings.clicked.connect(self.settings_win.activateWindow)
+
+        self.actionAbout.triggered.connect(self.show_about_dialog)
+        self.actionSettings.triggered.connect(self.settings_win.show)
+        self.actionSettings.triggered.connect(self.settings_win.activateWindow)
+        self.actionImage_Viewer.triggered.connect(self.open_img_viewer)
+        self.actionSelect_Folder.triggered.connect(self.loadfolder_f)
+        self.actionDocumentation.triggered.connect(self.open_docs)
+
         # images that are loaded in the tabs
         self.images = None
         # save the threshold value while binarizing
@@ -274,6 +282,13 @@ class MainWindow(QMainWindow):
         # for flask api
         self.flask_app = MyFlaskApp(self)
         self.api_button.clicked.connect(self.toggle_api)
+
+    def show_about_dialog(self):
+        QMessageBox.about(self, "About", "Program Written By Rakhul Raj \nIf this program is helpful in your work please cite our article")
+
+    def open_docs(self):
+        QDesktopServices.openUrl(QUrl("https://www.github.com"))
+
 
     def loadfolder_f(self):
         # create a file dialog object
@@ -908,11 +923,22 @@ outline : {mt.outline}'''
 
     def open_img_viewer(self):
         # self.img_viewer_open = True
-        self.img_viewer_b.setEnabled(False)
-        self.img_viewer = Modvortex_ImageProcessor(parent= self,
-                                                   worker= Worker)
-        self.img_viewer.show()
-        
+        if self.img_viewer is not None:
+
+            if self.img_viewer.isVisible():
+                self.img_viewer.show()
+            else:
+                self.img_viewer_b.setEnabled(False)
+                self.img_viewer = Modvortex_ImageProcessor(parent= self,
+                                                        worker= Worker)
+                self.img_viewer.show()
+        else:
+
+            self.img_viewer_b.setEnabled(False)
+            self.img_viewer = Modvortex_ImageProcessor(parent= self,
+                                                    worker= Worker)
+            self.img_viewer.show()
+    
 
     def toggle_api(self):
         if self.flask_app.server_started:
