@@ -17,7 +17,7 @@ from PyQt5.QtCore import pyqtSignal, QObject, QThread
 from PyQt5.uic import loadUi
 import cv2
 import processing as ps
-from typing import Union
+from typing import Tuple, Union
 
 
 from mymodule.utils import decorate_all_methods
@@ -146,10 +146,12 @@ class ImageProcessor(QMainWindow):
             folder = self.folders[self.current_folder_index]
             self.dir_label.setText(f'Current Directory: {folder}')
             if self.measType is None:
-
-                self.images = [cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)[:512]  for f in folder.iterdir() if f.suffix == '.png']
+                img_type : Tuple = ('.png', '.jpeg', '.jpg', '.webp')
+                image_files = [p for p in folder.iterdir() if np.any([p.name.lower().endswith(x) for x in img_type])]
+                self.images = [cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)[:512]  for f in image_files]
             else:
-                self.images = [ps.load_image(f, self.measType) for f in folder.iterdir() if f.suffix == '.png']
+                image_files = self.measType.settings.img_from_path(folder)
+                self.images = [ps.load_image(f, self.measType) for f in image_files]
             images = self.images
             if images:
                 if self.process_box.isChecked():

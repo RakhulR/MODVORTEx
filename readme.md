@@ -21,8 +21,8 @@
    - Download and extract the zip file and execute MODVORTEx
 
 3. **Using the GUI:**
-   - Load your folder containing microscopy images (only PNG format for now).
-   - Define measurement type (bubble domain, arbitrary structure).
+   - Load your folder containing microscopy images (png, jpeg/jpg and webp formats are supported).
+   - Define measurement type (BUBBLE_DIRECTIONAL, ARBITRARY_STRUCTURE, BUBBLE_CIRCLE_FIT).
    - Set binarization parameters.
    - Define measurement points (for directional measurements).
    - Calculate domain wall displacement and export data.

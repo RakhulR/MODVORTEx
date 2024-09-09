@@ -183,7 +183,8 @@ class MyFlaskApp:
 
 def get_edge_from_path_worker(data : str, measType:ps.Meas_Type, binarize: ps.Binarize_Type):
         
-        images = [ps.load_image(str(p), measType) for p in Path(data).glob('*.png')]
+        image_paths = measType.settings.img_from_path(Path(data))
+        images = [ps.load_image(str(p), measType) for p in image_paths]
         edge_img = ps.get_edge(images, binarize, measType)
 
         return edge_img  

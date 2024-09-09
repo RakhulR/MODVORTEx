@@ -56,10 +56,24 @@ Point =  namedtuple('Point', ['x', 'y'])
 @dataclass
 class Settings:
         
-        scale: float
-        kernel: int
-        img_width: int
-        img_height: int
+    scale: float
+    kernel: int
+    img_width: int
+    img_height: int
+    img_type: int # png, jpeg/jpg, webp -> 0, 1, 2
+    
+    def get_img_type(self):
+        
+        type_tuple_list = [('.png',), ('.jpeg', '.jpg'), ('.webp',)]
+
+        return type_tuple_list[self.img_type]
+    
+    def img_from_path(self, path: pathlib.Path):
+        "filter the paths to the images with the set format"
+        img_type : Tuple = self.get_img_type()
+        image_paths = [p for p in path.iterdir() if np.any([p.name.endswith(x) for x in img_type])]
+
+        return image_paths 
    
 class Meas_Type:
 
@@ -90,7 +104,7 @@ class Meas_Type:
         if isinstance(settings , Settings):
             self.settings = settings
         else:    
-            self.settings = Settings(scale = x20, kernel = 25, img_width = 0, img_height = 512)
+            self.settings = Settings(scale = x20, kernel = 25, img_width = 0, img_height = 512, img_type= 0)
 
     
     @classmethod
@@ -635,9 +649,10 @@ def get_pwidth(path: pathlib.Path) -> Tuple[float, str]:
         The unit of pulse width.
 
     """
-
-    name = path.name.replace('.png','').split('_')[0]
-
+    # replaces the extension of the file name to ""
+    name = re.sub(r'\.\w+$', "", path.name)
+    # r'\.\w+$' matches a literal dot followed by one or more word characters at the end of the string
+    
     unit = re.findall(r'[a-z]+$', name)[-1]
     a = re.split(r'[a-z]+$', name)[0].split('p')
     width = float('.'.join(a))
@@ -950,7 +965,8 @@ def dt_curve(paths : List[pathlib.Path], voltage : str, measType: Meas_Type, bin
 
     for path in paths:
         # print(path)
-        images = [*path.glob('*.png')]
+        images = measType.settings.img_from_path(path)
+        # images = [*path.glob('*.png')]
         pulse_width = get_pwidth(images[0])[0]
         # images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
         images = [load_image(image, measType) for image in images]

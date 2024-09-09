@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>371</width>
-    <height>319</height>
+    <width>390</width>
+    <height>349</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -18,14 +18,14 @@
   </property>
   <property name="minimumSize">
    <size>
-    <width>371</width>
-    <height>319</height>
+    <width>390</width>
+    <height>349</height>
    </size>
   </property>
   <property name="maximumSize">
    <size>
-    <width>371</width>
-    <height>319</height>
+    <width>390</width>
+    <height>349</height>
    </size>
   </property>
   <property name="windowTitle">
@@ -63,6 +63,9 @@
     <layout class="QHBoxLayout" name="horizontalLayout_2">
      <item>
       <widget class="QLabel" name="label_2">
+       <property name="toolTip">
+        <string>Kernel size should be an odd number</string>
+       </property>
        <property name="text">
         <string>Gaussian Blur Kernel</string>
        </property>
@@ -142,6 +145,42 @@
        <property name="value">
         <number>0</number>
        </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_6">
+     <item>
+      <widget class="QLabel" name="label_5">
+       <property name="toolTip">
+        <string>The format of the image to be loaded</string>
+       </property>
+       <property name="text">
+        <string>Image format</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="img_type_box">
+       <item>
+        <property name="text">
+         <string>png</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>jpeg/jpg</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>webp</string>
+        </property>
+       </item>
       </widget>
      </item>
     </layout>

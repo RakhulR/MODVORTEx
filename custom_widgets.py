@@ -281,7 +281,9 @@ class MainWindow(QMainWindow):
         self.api_button.clicked.connect(self.toggle_api)
 
     def show_about_dialog(self):
-        QMessageBox.about(self, "About", "Program Written By Rakhul Raj \nIf this program is helpful in your work, please cite our article")
+        version = QApplication.instance().applicationVersion()
+        QMessageBox.about(self, "About", f"MODVORTEx \n(Magneto Optical Domain Velocity Observation and Real-Time Extraction) \nVersion: {version} \n"
+                          "Written By Rakhul Raj \nIf this program is helpful in your work, please cite our article")
 
     def open_docs(self):
         QDesktopServices.openUrl(QUrl("https://github.com/RakhulR/MODVORTEx"))
@@ -329,15 +331,18 @@ class MainWindow(QMainWindow):
             while self.tabWidget.count():
                 self.tabWidget.widget(0).deleteLater()
                 self.tabWidget.removeTab(0)
-                
-                
+
+            measType =  ps.Meas_Type.from_window(self)    
+
             text = self.textInputFolder.toPlainText()
             path = Path(text)
-            images =[* path.glob('*.png')][::1]
+
+            image_paths = measType.settings.img_from_path(path)
+            # images =[* path.glob('*.png')][::1]
         
             # images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-            measType =  ps.Meas_Type.from_window(self)
-            images = [ps.load_image(image, measType) for image in images]
+            
+            images = [ps.load_image(image, measType) for image in image_paths]
             self.images = images
             images = [self.qimage_fromdata(image) for image in images]
             
@@ -924,6 +929,7 @@ outline : {mt.outline}'''
 
             if self.img_viewer.isVisible():
                 self.img_viewer.show()
+                self.img_viewer.activateWindow()
             else:
                 self.img_viewer = Modvortex_ImageProcessor(parent= self,
                                                         worker= Worker)
@@ -1208,8 +1214,9 @@ class SettingWindow(QDialog):
         self.kernel: int
         self.img_width: int
         self.img_height: int
+        self.img_type : int
 
-        self.key_list = ['scale', 'kernel', 'img_width', 'img_height'] # these are the attributes of this subclass
+        self.key_list = ['scale', 'kernel', 'img_width', 'img_height', 'img_type'] # these are the attributes of this subclass
 
         # Load default settings
         self.set_constants(application_path / "settings" / "default.set")
@@ -1224,7 +1231,7 @@ class SettingWindow(QDialog):
         self.gaussian_box.valueChanged.connect(self.check_changes)
         self.img_width_box.valueChanged.connect(self.check_changes)
         self.img_height_box.valueChanged.connect(self.check_changes)
-
+        self.img_type_box.currentIndexChanged.connect(self.check_changes)
         # Initial check to update the set button state
         self.check_changes()
 
@@ -1246,6 +1253,7 @@ class SettingWindow(QDialog):
             data['kernel'] = int(data['kernel'])
             data['img_width'] = int(data['img_width'])
             data['img_height'] = int(data['img_height'])
+            data['img_type'] = int(data['img_type'])
             self.__dict__.update(data)
         else:
             raise ValueError('Invalid Settings file')
@@ -1261,6 +1269,7 @@ class SettingWindow(QDialog):
         self.gaussian_box.setValue(self.kernel)
         self.img_width_box.setValue(self.img_width)
         self.img_height_box.setValue(self.img_height)
+        self.img_type_box.setCurrentIndex(self.img_type)
 
     def set_value(self) -> None:
         """
@@ -1270,6 +1279,7 @@ class SettingWindow(QDialog):
         self.kernel = self.gaussian_box.value()
         self.img_width = self.img_width_box.value()
         self.img_height = self.img_height_box.value()
+        self.img_type = self.img_type_box.currentIndex()
         self.check_changes()
 
     def load_preset(self) -> None:
@@ -1294,6 +1304,7 @@ class SettingWindow(QDialog):
                 self.gaussian_box.setValue(int(data['kernel']))
                 self.img_width_box.setValue(int(data['img_width']))
                 self.img_height_box.setValue(int(data['img_height']))
+                self.img_type_box.setCurrentIndex(int(data['img_type']))
             else:
                 raise ValueError('Invalid Settings file')
             
@@ -1311,7 +1322,8 @@ class SettingWindow(QDialog):
                 'scale': self.scale_box.value(),
                 'kernel': self.gaussian_box.value(),
                 'img_width': self.img_width_box.value(),
-                'img_height': self.img_height_box.value()
+                'img_height': self.img_height_box.value(),
+                'img_type' : self.img_type_box.currentIndex()
             }
             df = pd.DataFrame(list(data.items()), columns=['Parameter', 'Value'], dtype= 'object')
             df.to_csv(file_path, sep='=', header=False, index=False)
@@ -1323,7 +1335,8 @@ class SettingWindow(QDialog):
         if (self.scale_box.value() != self.scale or
             self.gaussian_box.value() != self.kernel or
             self.img_width_box.value() != self.img_width or
-            self.img_height_box.value() != self.img_height):
+            self.img_height_box.value() != self.img_height or
+            self.img_type_box.currentIndex() != self.img_type):
             self.set_button.setEnabled(True)
         else:
             self.set_button.setEnabled(False)
