@@ -282,8 +282,12 @@ class MainWindow(QMainWindow):
 
     def show_about_dialog(self):
         version = QApplication.instance().applicationVersion()
-        QMessageBox.about(self, "About", f"MODVORTEx \n(Magneto Optical Domain Velocity Observation and Real-Time Extraction) \nVersion: {version} \n"
-                          "Written By Rakhul Raj \nIf this program is helpful in your work, please cite our article")
+        QMessageBox.about(self, "About", f"""<p>MODVORTEx<br>
+        (Magneto Optical Domain Velocity Observation and Real-Time Extraction)<br>
+        Version: {version}<br>
+        Written By Rakhul Raj<br>
+        If this program is helpful in your work, please cite our <a href="https://dx.doi.org/10.1088/1361-6501/ad8beb">article</a>.</p>""")
+
 
     def open_docs(self):
         QDesktopServices.openUrl(QUrl("https://github.com/RakhulR/MODVORTEx"))

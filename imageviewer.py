@@ -5,6 +5,7 @@ Created on Sat May 20 09:11:45 2023
 @author: Rakhul Raj
 """
 import re
+import os
 import sys
 from pathlib import Path
 import time
@@ -22,6 +23,15 @@ from typing import Tuple, Union
 
 from mymodule.utils import decorate_all_methods
 from mymodule.exceptions import exception_handler
+
+
+if getattr(sys, 'frozen', False):
+    # If the application is run as a bundle, the PyInstaller bootloader
+    # extends the sys module by a flag frozen=True and sets the app
+    # path into variable _MEIPASS'.
+    application_path = Path(sys._MEIPASS)
+else:
+    application_path = Path(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Worker(QObject):
@@ -68,7 +78,7 @@ class Worker(QObject):
 class ImageProcessor(QMainWindow):
     def __init__(self, worker: Worker = Worker):
         super().__init__()
-        loadUi('imageviewer.ui', self)  # Load the UI file
+        loadUi(application_path/ 'imageviewer.ui', self)  # Load the UI file
         self.current_folder_index = 0  # Initialize current_folder_index
         self.folders = []  # Initialize folders list
         self.images = []

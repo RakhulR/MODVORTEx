@@ -10,7 +10,7 @@ import os
 import multiprocessing
 from pathlib import Path
 
-APP_VERSION = "1.3.3"
+APP_VERSION = "1.3.4"
 
 from PyQt5.QtWidgets import QApplication
 
@@ -44,6 +44,7 @@ if __name__ == '__main__':
     # create a mainwindow
     window = MainWindow()
     window.show()
+    window.show_about_dialog()
     window.activateWindow()
 
     app.exec_()
