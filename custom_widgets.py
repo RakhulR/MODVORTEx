@@ -29,7 +29,9 @@ from PyQt5.QtWidgets import (QMainWindow,
                              QSizePolicy,
                              QWidget,
                              QPushButton,
-                             QDialog
+                             QDialog,
+                             QScrollArea,
+                             QVBoxLayout
     )
 from PyQt5 import uic
 from PyQt5.QtCore import QSize, QPoint, Qt, QUrl
@@ -181,7 +183,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         
         super(MainWindow, self).__init__()
-        uic.loadUi(application_path/"mainwindow_v.ui", self)
+        uic.loadUi(application_path/"mainwindow_v_new.ui", self)
         # self.toolButton.setIconSize(iconSize)
         # setting slot for the qaction
         self.actionBinarizeImage.triggered.connect(self.display_binarized)
@@ -207,12 +209,7 @@ class MainWindow(QMainWindow):
         self.loadPointsButton.clicked.connect(self.def_direction)
         self.dial.valueChanged.connect(self.dial_changed)
         self.genEdges.clicked.connect(self.set_edge)
-        self.calcButton.clicked.connect(lambda : print(
-                                                        ps.calculate_motion_displace(self.images, ps.Meas_Type.from_window(self), 
-                                                                         ps.Binarize_Type.from_window(self)
-                                                                         )
-                                                        )
-                                        )
+        self.calcButton.clicked.connect(self.calculate_current)
         self.calcAllButton.clicked.connect(lambda :  self.calculate_all()
                                            if self.calcAllButton.text() == "Calculate All"
                                             else self.stop_calculate_all() )
@@ -286,7 +283,7 @@ class MainWindow(QMainWindow):
         (Magneto Optical Domain Velocity Observation and Real-Time Extraction)<br>
         Version: {version}<br>
         Written By Rakhul Raj<br>
-        If this program is helpful in your work, please cite our <a href="https://dx.doi.org/10.1088/1361-6501/ad8beb">article</a>.</p>""")
+        If this program is helpful in your work, please cite our articles <a href="https://dx.doi.org/10.1088/1361-6501/ad8beb">1</a> and <a href="https://dx.doi.org/10.1088/1361-6501/acd39d">2</a>.</p>""")
 
 
     def open_docs(self):
@@ -309,65 +306,144 @@ class MainWindow(QMainWindow):
             res = Path(folder[0]).parent
             self.textInputFolder.setPlainText(str(res))
 
-    def load_images(self, update_images = None):
-        '''
-        load the images to the tabs form the inputfolder if no update_images are given.
-        or update the images if update_images are given
+
+    # Helper: get the label inside a tab (supports QScrollArea or direct label)
+    def get_label_from_tab(self, index):
+        w = self.tabWidget.widget(index)
+        if w is None:
+            return None
+        # If the tab content is a QScrollArea, the label is its widget
+        if isinstance(w, QScrollArea):
+            return w.widget()
+        # If the tab content is a container, try to find the first QLabel-like child
+        # (your MyLabel derives from QLabel and supports setPixmap)
+        for child in w.findChildren(QWidget):
+            # Prefer the first MyLabel or QLabel found
+            if hasattr(child, 'setPixmap'):
+                return child
+        # If the tab content itself is the label
+        if hasattr(w, 'setPixmap'):
+            return w
+        return None
+
+    def add_label_as_tab(self, label: "MyLabel", title: str):
+        """
+        Wrap a given MyLabel in a scrollable container and add it as a tab.
+
+        Parameters
+        ----------
+        label : MyLabel
+            The custom label containing the image/pixmap.
+        title : str
+            The title to display on the tab.
+
+        Returns
+        -------
+        None
+        """
+        # Ensure label has its natural size so scrollbars appear if needed
+        if label.pixmap() is not None:
+            img_size = label.pixmap().size()
+            label.resize(img_size.width(), img_size.height())
+            label.setMinimumSize(img_size.width(), img_size.height())
+
+        # Wrap in a scroll area
+        scroll = QScrollArea()
+        scroll.setWidget(label)
+        scroll.setWidgetResizable(False)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Put scroll area inside a container (for future extensibility)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(scroll)
+
+        # Add to tab widget
+        self.tabWidget.addTab(container, title)
+
+
+    def load_images(self, update_images=None):
+        """
+        Load images into tabs from the input folder if no update_images are given,
+        or update the existing tabs' images if update_images are provided.
 
         Parameters
         ----------
         update_images : list, optional
-            Image to update if needed. The default is None.
+            Image data to update existing tabs. If None, images are loaded
+            from the input folder according to the selected measurement type.
 
         Returns
         -------
         None.
+        """
 
-        '''
-        # extracting the text from the textbox
-        # self.tabWidget.clear()
-
-
-            
-        if update_images == None:
-            
-            # clearing all tabs
+        # Case 1: Initial load from folder (no update_images provided)
+        if update_images is None:
+            # Clear existing tabs safely
             while self.tabWidget.count():
-                self.tabWidget.widget(0).deleteLater()
+                w = self.tabWidget.widget(0)
+                if w is not None:
+                    w.deleteLater()
                 self.tabWidget.removeTab(0)
 
-            measType =  ps.Meas_Type.from_window(self)    
-
-            text = self.textInputFolder.toPlainText()
+            # Determine measurement type and input path
+            measType = ps.Meas_Type.from_window(self)
+            text = self.textInputFolder.toPlainText().strip()
             path = Path(text)
 
+            # Resolve image paths via your settings
             image_paths = measType.settings.img_from_path(path)
-            # images =[* path.glob('*.png')][::1]
-        
-            # images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
-            
-            images = [ps.load_image(image, measType) for image in image_paths]
-            self.images = images
-            images = [self.qimage_fromdata(image) for image in images]
-            
-            tabs = [MyLabel(mainwindow= self) for _ in images]
-            [x.set_outline(self.dial.value()) for x in tabs]
-            [label.resize(image.size().width(), image.size().height()) for label, image in zip(tabs,images)]
-            [label.setMaximumSize(image.size().width(), image.size().height()) for label, image in zip(tabs,images)]
-            [tab.setPixmap(QPixmap.fromImage(image))for tab, image in zip(tabs,images)]
-            
-            for ii, tab in enumerate(tabs):
-                
-                self.tabWidget.addTab(tab, f"img{ii}")
-                
 
-        else :
-            
-            images = [self.qimage_fromdata(image) for image in update_images]
-            
-            tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
-            
-            [tab.setPixmap(QPixmap.fromImage(image))for tab, image in zip(tabs,images)]
+            # Load raw images and keep a copy
+            raw_images = [ps.load_image(image_path, measType) for image_path in image_paths]
+            self.images = raw_images  # preserve original data as before
+
+            # Convert to QImage for display
+            qimages = [self.qimage_fromdata(img) for img in raw_images]
+
+            # Build tabs: MyLabel -> QScrollArea -> Tab
+            for ii, qimg in enumerate(qimages):
+                # Create your label and set image
+                label = MyLabel(mainwindow=self)
+                label.set_outline(self.dial.value())
+                label.setPixmap(QPixmap.fromImage(qimg))
+                self.add_label_as_tab(label, f"img{ii}")
+
+        # Case 2: Update existing tabs with new images
+        else:
+            # Convert incoming images to QImage
+            qimages = [self.qimage_fromdata(img) for img in update_images]
+
+            # Update each existing tab's label (up to the number of tabs and provided images)
+            tab_count = self.tabWidget.count()
+            n = min(tab_count, len(qimages))
+            for i in range(n):
+                qimg = qimages[i]
+                label = self.get_label_from_tab(i)
+                if label is None:
+                    continue
+
+                # Update pixmap and resize label to new image size
+                label.setScaledContents(False)
+                label.setPixmap(QPixmap.fromImage(qimg))
+
+                img_size = qimg.size()
+                label.resize(img_size.width(), img_size.height())
+                label.setMinimumSize(img_size.width(), img_size.height())
+
+                # If the tab is a QScrollArea, ensure policies remain correct
+                tab_content = self.tabWidget.widget(i)
+                if isinstance(tab_content, QWidget):
+                    # Find a QScrollArea inside container (if layout was used)
+                    scroll_areas = tab_content.findChildren(QScrollArea)
+                    for scroll in scroll_areas:
+                        scroll.setWidgetResizable(False)
+                        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
 
     def auto_domain_select(self):
 
@@ -414,22 +490,12 @@ class MainWindow(QMainWindow):
 
             [cv2.circle(new_img, tuple(np.round(center).astype(int)), round(radius), ps.bd.constant.RED,1) 
              for center, radius in  cen_rad]
-
-
-        
-        tab = MyLabel(mainwindow= self)
-        tab.set_outline(self.dial.value()) # setting the outline value of mylabel
-
-        image = self.qimage_fromdata(new_img)
-        tab.resize(image.size().width(), image.size().height())
-        tab.setMaximumSize(image.size().width(), image.size().height())
-        
-        tab.setPixmap(QPixmap.fromImage(image))
-
-        self.tabWidget.addTab(tab, 'domain_fit')
-
-
-
+ 
+        label = MyLabel(mainwindow=self)
+        label.set_outline(self.dial.value())
+        qimg = self.qimage_fromdata(new_img)
+        label.setPixmap(QPixmap.fromImage(qimg))
+        self.add_label_as_tab(label, "domain_fit")
 
     def dial_changed(self, value):
 
@@ -437,7 +503,7 @@ class MainWindow(QMainWindow):
         self.label_dial.setText(f'Width\n({value})')
 
         # Changes the outline in the line drawn on all the custom labels
-        tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
+        tabs = [self.get_label_from_tab(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
         [tab.set_outline(value) for tab in tabs]
 
     def update_position_label(self, x:str, y:str):
@@ -453,7 +519,7 @@ class MainWindow(QMainWindow):
             ps.plt_histogram(image= self.images[ind],threshold= self.spinBox.value(), blur_kernel= kernel )
         else: # current tab is edge tab
         
-            label: QLabel = self.tabWidget.widget(ind)
+            label: QLabel = self.get_label_from_tab(ind)
             
             pixmap: QPixmap = label.pixmap()
 
@@ -670,8 +736,8 @@ class MainWindow(QMainWindow):
         
     def def_direction(self):
         
-        tab = self.tabWidget.widget(self.tabWidget.currentIndex())
-        tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
+        tab = self.get_label_from_tab(self.tabWidget.currentIndex())
+        tabs = [self.get_label_from_tab(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]
         
         if tab.first_click is not None and tab.second_click is not None:
             
@@ -689,8 +755,8 @@ class MainWindow(QMainWindow):
     
     def set_direction(self):
         
-        tab = self.tabWidget.widget(self.tabWidget.currentIndex())
-        tabs = [self.tabWidget.widget(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]        
+        tab = self.get_label_from_tab(self.tabWidget.currentIndex())
+        tabs = [self.get_label_from_tab(i) for i in range(self.tabWidget.count()) if self.tabWidget.widget(i)]        
        
         # taking the points cordinates form input
         p1 =  QPoint(self.linep1_x.value(), self.linep1_y.value())
@@ -726,25 +792,35 @@ class MainWindow(QMainWindow):
         new_img = ps.get_edge(self.images, binarize, measType)
         # new_img = cv2.cvtColor(new_img, cv2.COLOR_GRAY2RGB)
         
-        tab = MyLabel(mainwindow= self)
-        tab.set_outline(self.dial.value()) # setting the outline value of mylabel
-        # tab.setScaledContents(True)
-        # tab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        image = self.qimage_fromdata(new_img)
-        tab.resize(image.size().width(), image.size().height())
-        tab.setMaximumSize(image.size().width(), image.size().height())
-        
-        tab.setPixmap(QPixmap.fromImage(image))
-        
-        # tab.setMask(QPixmap.fromImage(image).mask())
-        # cv2.imshow('Image 2', new_img)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-        # plt.imshow(new_img)
+        label = MyLabel(mainwindow=self)
+        label.set_outline(self.dial.value())
+        qimg = self.qimage_fromdata(new_img)
+        label.setPixmap(QPixmap.fromImage(qimg))
+        self.add_label_as_tab(label, "edges")
 
-        self.tabWidget.addTab(tab, 'edges')
+    def calculate_current(self):
+        # Calculating distance
+        displacements = ps.calculate_motion_displace(
+            self.images,
+            ps.Meas_Type.from_window(self),
+            ps.Binarize_Type.from_window(self)
+        )
+        displacements = [x for x in displacements if x]
+        displacements = np.array([x for y in displacements for x in y])
+        displacement = np.nanmean(displacements)
+        std = np.nanstd(displacements)
+
+        # # Format the output
+        result_text = f"Displacement: {displacement:.2f}\nStandard Deviation: {std:.2f}"
         
-        
+
+        # # Print into QTextEdit
+        self.textOutput.append(result_text)   # appends new line each time
+        self.textOutput.append("-" * 40)
+
+        # # or use setPlainText(result_text) if you want to overwrite instead
+        # # self.textOutput.append("<hr>") # horizontal rule in HTML  
+
     def calculate_all(self):
         
         paths = Path(self.textInputFolder.toPlainText()).parent
@@ -1111,7 +1187,7 @@ class MyLabel(QLabel):
             painter.setPen(pen)
             painter.drawLine(self.first_click, self.second_click)
             
-            if self.outline > 0:
+            if self.outline > 2:
     
                 pen = QPen(Qt.green, 2)
                 painter.setPen(pen)

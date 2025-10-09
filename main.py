@@ -10,7 +10,7 @@ import os
 import multiprocessing
 from pathlib import Path
 
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.3.5"
 
 from PyQt5.QtWidgets import QApplication
 

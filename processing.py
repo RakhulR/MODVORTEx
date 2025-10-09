@@ -716,7 +716,7 @@ def bdw_detect(image, center):
         c1 = min(contours, key= lambda x : distance(contour_center(x), center))
     except ValueError as err:
         
-        c1 = np.array([])
+        c1 = np.empty((0, 0), dtype=np.int32)
     
     return c1.squeeze()
 
