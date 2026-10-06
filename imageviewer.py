@@ -158,6 +158,7 @@ class ImageProcessor(QMainWindow):
             if self.measType is None:
                 img_type : Tuple = ('.png', '.jpeg', '.jpg', '.webp')
                 image_files = [p for p in folder.iterdir() if np.any([p.name.lower().endswith(x) for x in img_type])]
+                image_files.sort(key=ps.image_sort_key)
                 self.images = [cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)[:512]  for f in image_files]
             else:
                 image_files = self.measType.settings.img_from_path(folder)

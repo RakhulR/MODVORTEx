@@ -7,6 +7,7 @@ Created on Thu Apr  6 17:06:11 2023
 # from typing import TYPE_CHECKING
 import cv2
 import sys
+import warnings
 from dataclasses import dataclass
 from numba import njit
 import numpy as np
@@ -53,6 +54,94 @@ x20 = (100/149)
 
 Point =  namedtuple('Point', ['x', 'y'])
 
+# Pattern for image file stems: <number with p as decimal><unit><optional repeat>
+# Examples: 0p44s -> (0.44, s, 0), 0p44s_001 -> (0.44, s, 1),
+# 0p44s10 -> (0.44, s, 10), 500ns -> (500.0, ns, 0).
+# Bare file (no repeat digits) is repeat 0, so it sorts before _001.
+# Units are matched longest-first (ms/us/ns before s), case-insensitive.
+_IMAGE_STEM_RE = re.compile(
+    r'^(?P<num>\d+(?:p\d+)?)(?P<unit>ms|us|ns|s)(?P<sep>_?)(?P<rep>\d*)$',
+    re.IGNORECASE,
+)
+
+def parse_image_stem(stem: str) -> Tuple[float, str, int]:
+    """
+    Split an image file stem into (pulse_value, unit, repeat_index).
+
+    The repeat index is the digits after the unit, with or without an
+    underscore (``_001``, ``_1``, ``10``). A bare name like ``0p44s``
+    has repeat 0, so it sorts first and acts as the reference image.
+
+    Raises ValueError if the stem does not match the expected pattern.
+    """
+    m = _IMAGE_STEM_RE.match(stem)
+    if m is None:
+        raise ValueError(
+            f"Image name '{stem}' does not match '<number>p<dec><unit>[repeat>]' "
+            "(e.g. 0p44s.png, 0p44s_001.png, 0p44s10.png)"
+        )
+    num_part = m.group('num')
+    unit = m.group('unit').lower()
+    rep_part = m.group('rep')
+    repeat = int(rep_part) if rep_part else 0
+    width = float('.'.join(num_part.split('p')))
+    return width, unit, repeat
+
+
+def _natural_key(text: str) -> Tuple:
+    """
+    Split text into lowercase string / integer chunks so embedded numbers
+    compare numerically (``frame2 < frame10``) instead of alphabetically.
+    """
+    return tuple(
+        int(chunk) if chunk.isdigit() else chunk.lower()
+        for chunk in re.split(r'(\d+)', text)
+    )
+
+
+def image_sort_key(path: pathlib.Path) -> Tuple:
+    """
+    Deterministic order for images in an amplitude folder.
+
+    Coded pulse-width names sort by (pulse_value, repeat_index, filename)
+    so the reference image (bare name = repeat 0, or lowest suffix like
+    _000/_001) is always first, and numeric repeats order correctly
+    (_2 < _10, 2 < 10) regardless of zero-padding or underscore.
+
+    Names without a coded pulse width fall back to natural-number filename
+    order (``frame2 < frame10``) after all coded names.
+    """
+    # Strip only the final extension (handles .png, .jpeg, .jpg, .webp).
+    stem = re.sub(r'\.\w+$', '', path.name)
+    try:
+        width, _unit, repeat = parse_image_stem(stem)
+    except ValueError:
+        return (float('inf'), 0, _natural_key(path.name))
+    return (width, repeat, _natural_key(path.name))
+
+
+def infer_image_order(paths: List[pathlib.Path]) -> Tuple[List[pathlib.Path], bool]:
+    """
+    Predict the time order of images in an amplitude folder.
+
+    Returns (ordered_paths, needs_confirm). ``needs_confirm`` is False only
+    when every file carries a coded pulse width (e.g. ``0p44s.png``,
+    ``0p44s_001.png``) and the order is fully determined. For any folder
+    with uncoded names (e.g. ``frame1.png`` or ``snapshot.png``) the caller
+    should show the predicted order to the user for confirmation, since the
+    true acquisition order cannot be derived from the names alone.
+    """
+    ordered = sorted(paths, key=image_sort_key)
+    needs_confirm = False
+    for p in ordered:
+        stem = re.sub(r'\.\w+$', '', p.name)
+        try:
+            parse_image_stem(stem)
+        except ValueError:
+            needs_confirm = True
+            break
+    return ordered, needs_confirm
+
 @dataclass
 class Settings:
         
@@ -72,14 +161,18 @@ class Settings:
         "filter the paths to the images with the set format"
         img_type : Tuple = self.get_img_type()
         image_paths = [p for p in path.iterdir() if np.any([p.name.endswith(x) for x in img_type])]
+        # Deterministic reference-first order for all repeat-numbering
+        # variants (bare, _000, _001.., _1.., suffix without _). See image_sort_key.
+        image_paths.sort(key=image_sort_key)
 
-        return image_paths 
+        return image_paths
    
 class Meas_Type:
 
     BUBBLE_CIRCLE_FIT  = 2
     BUBBLE_DIRECTIONAL = 0
-    ARBITARY_STRUCTURE = 1
+    ARBITRARY_STRUCTURE = 1
+    ARBITARY_STRUCTURE = ARBITRARY_STRUCTURE  # deprecated alias for backward compatibility
 
     
     def __init__(self, 
@@ -565,7 +658,11 @@ class Domain_mot():
     def get_intersect(self, line: Point):
         
         dws = self.walls
-        asline = [lstr(x) for x in dws]
+        # GEOS LineStrings need 0 or >= 2 points; degenerate walls
+        # (single-pixel specks, None) become empty lines so they yield
+        # NaN downstream instead of raising GEOSException. Substituting
+        # (rather than dropping) preserves frame-to-frame alignment for diff().
+        asline = [lstr(x) if x is not None and len(x) > 1 else lstr() for x in dws]
         # point1 = QPoint(*line[0])
         # point2 = QPoint(*line[1])
         point1 = (line[0].x, line[0].y)
@@ -655,10 +752,10 @@ def get_pwidth(path: pathlib.Path) -> Tuple[float, str]:
     # replaces the extension of the file name to ""
     name = re.sub(r'\.\w+$', "", path.name)
     # r'\.\w+$' matches a literal dot followed by one or more word characters at the end of the string
-    
-    unit = re.findall(r'[a-z]+$', name)[-1]
-    a = re.split(r'[a-z]+$', name)[0].split('p')
-    width = float('.'.join(a))
+
+    # Strip any repeat suffix first so all repeats in a folder map to the
+    # same pulse width: 0p44s.png, 0p44s_001.png and 0p44s10.png -> 0.44 s.
+    width, unit, _repeat = parse_image_stem(name)
 
     return width, unit
 
@@ -807,9 +904,15 @@ def mark_center(contour, image, color = None, radius = 3):
 
 def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, measType: Meas_Type, binarize: Binarize_Type) -> pd.DataFrame:
     '''
-    Takes the parent path which contains the voltage measurements and returns 
+    .. deprecated::
+        `dt_curve_first` is deprecated and may be removed in a later version.
+        It hardcodes ``*.png`` loading with a fixed ``[:512]`` crop instead of
+        using the dynamically configured image format/cropping from Settings
+        (`Settings.img_from_path` / `load_image`). Use `dt_curve` instead.
+
+    Takes the parent path which contains the voltage measurements and returns
     a displacement v/s pulse_width data. it only considers the first pulse for the displacement measurement
-    
+
     Parameters
     ----------
     path : pathlib.Path
@@ -828,11 +931,19 @@ def dt_curve_first(paths : pathlib.Path, pulse_select : int,  voltage : str, mea
     
     '''
         
+    warnings.warn(
+        "dt_curve_first is deprecated and may be removed in a later version. "
+        "It hardcodes '*.png' loading with a fixed [:512] crop instead of the "
+        "configured image format/cropping; use dt_curve instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
     dta = pd.DataFrame(columns = ['pulse_width', 'displacement', 'std'])
     data = {}
     for path in list(paths.glob(f'{voltage}V*')):
-        
-        images = [*path.glob('*.png')]
+
+        images = sorted([*path.glob('*.png')], key=image_sort_key)
         pulse_width = get_pwidth(images[0])[0]
         images = [cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)[:512] for image in images]
         displacement = calculate_motion(images, measType, binarize)
@@ -920,7 +1031,7 @@ def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
         # making the center of each contour in the image
         [mark_center(contour, new_img) for contour in dws_contours]
         
-    elif measType == Meas_Type.ARBITARY_STRUCTURE:
+    elif measType == Meas_Type.ARBITRARY_STRUCTURE:
         
         # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
         # uses a edege detection
@@ -1027,7 +1138,7 @@ def calculate_motion(images, measType: Meas_Type, binarize: Binarize_Type):
             # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
             dws = [bdw_detect(image, measType.center) for image in bin_imgs]
             
-        elif measType == Meas_Type.ARBITARY_STRUCTURE:
+        elif measType == Meas_Type.ARBITRARY_STRUCTURE:
             
             # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
             # uses a edege detection

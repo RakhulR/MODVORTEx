@@ -254,13 +254,12 @@ def get_pwidth(path: pathlib.Path) -> Tuple[float, str]:
 
     """
 
-    name = path.name.replace('.png','').split('_')[0]
-
-    unit = re.findall(r'[a-z]+$', name)[-1]
-    a = re.split(r'[a-z]+$', name)[0].split('p')
-    width = float('.'.join(a))
-
-    return width, unit
+    # Delegate to the single implementation in processing.py so all
+    # repeat-numbering variants (bare, _000, _001.., _1.., suffix
+    # without _) parse identically. Imported lazily to avoid a cycle
+    # (processing.py imports bubble as bd).
+    import processing as _ps
+    return _ps.get_pwidth(path)
 def domain_selector(contour, center):
     p1 = np.round(centroid(contour))
     p2 = center

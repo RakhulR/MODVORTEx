@@ -8,10 +8,13 @@ Created on Tue Mar  7 12:01:56 2023
 import sys
 import os
 import re
+import concurrent.futures
 from multiprocessing import Pool
 from threading import Thread
 from functools import partial
 from pathlib import Path
+
+DOCS_URL = "https://github.com/RakhulR/MODVORTEx"
 from typing import TYPE_CHECKING, Union
 from typing import TypeVar, Tuple, Any, List
 
@@ -24,14 +27,19 @@ from PyQt5.QtWidgets import (QMainWindow,
                              QApplication,
                              QMessageBox,
                              QFileDialog,
-                             QLabel, 
+                             QLabel,
                              QShortcut,
                              QSizePolicy,
                              QWidget,
                              QPushButton,
                              QDialog,
                              QScrollArea,
-                             QVBoxLayout
+                             QVBoxLayout,
+                             QHBoxLayout,
+                             QListWidget,
+                             QListWidgetItem,
+                             QDialogButtonBox,
+                             QAction
     )
 from PyQt5 import uic
 from PyQt5.QtCore import QSize, QPoint, Qt, QUrl
@@ -177,6 +185,114 @@ class Modvortex_ImageProcessor(imageviewer.ImageProcessor):
         
     
 
+class ReorderDialog(QDialog):
+    """Let the user confirm/arrange image time order with a preview.
+
+    Shown when filenames carry no coded pulse width, so the acquisition
+    order cannot be derived from the names alone. The list is pre-filled
+    with the predicted (natural-number) order; the first row acts as the
+    reference image.
+    """
+
+    def __init__(self, parent=None, file_names=None, preview_loader=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirm image order")
+        self.setWindowModality(Qt.WindowModal)
+        self.resize(560, 420)
+        self._preview_loader = preview_loader
+
+        info = QLabel(
+            "The program could not determine the time order from the file "
+            "names.\nPlease arrange the images oldest-first (first row = "
+            "reference image) and press OK."
+        )
+        info.setWordWrap(True)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(info)
+
+        content = QHBoxLayout()
+        main_layout.addLayout(content)
+
+        self.file_list = QListWidget()
+        self.file_list.setSelectionMode(QListWidget.SingleSelection)
+        # Both drag-and-drop and Up/Down buttons are supported.
+        self.file_list.setDragDropMode(QListWidget.InternalMove)
+        self.file_list.setDefaultDropAction(Qt.MoveAction)
+        for name in (file_names or []):
+            QListWidgetItem(name, self.file_list)
+        if self.file_list.count():
+            self.file_list.setCurrentRow(0)
+        content.addWidget(self.file_list, 1)
+
+        side = QVBoxLayout()
+        content.addLayout(side)
+
+        self.preview_label = QLabel("Select an image to preview")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setMinimumSize(280, 280)
+        self.preview_label.setScaledContents(False)
+        side.addWidget(self.preview_label)
+
+        move_row = QHBoxLayout()
+        side.addLayout(move_row)
+        self.up_button = QPushButton("Move Up")
+        self.down_button = QPushButton("Move Down")
+        move_row.addWidget(self.up_button)
+        move_row.addWidget(self.down_button)
+
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        main_layout.addWidget(self.button_box)
+
+        self.up_button.clicked.connect(self.move_up)
+        self.down_button.clicked.connect(self.move_down)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        self.file_list.currentRowChanged.connect(self.update_preview)
+        self.update_preview(self.file_list.currentRow())
+
+    def move_up(self):
+        row = self.file_list.currentRow()
+        if row > 0:
+            item = self.file_list.takeItem(row)
+            self.file_list.insertItem(row - 1, item)
+            self.file_list.setCurrentRow(row - 1)
+
+    def move_down(self):
+        row = self.file_list.currentRow()
+        if 0 <= row < self.file_list.count() - 1:
+            item = self.file_list.takeItem(row)
+            self.file_list.insertItem(row + 1, item)
+            self.file_list.setCurrentRow(row + 1)
+
+    def update_preview(self, row):
+        if self._preview_loader is None or row is None or row < 0:
+            return
+        try:
+            pixmap = self._preview_loader(self.file_list.item(row).text())
+        except Exception:
+            pixmap = None
+        if pixmap is None or pixmap.isNull():
+            self.preview_label.setText("No preview available")
+            self.preview_label.setPixmap(QPixmap())
+        else:
+            self.preview_label.setPixmap(
+                pixmap.scaled(
+                    self.preview_label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+            )
+
+    def ordered_names(self):
+        return [
+            self.file_list.item(i).text()
+            for i in range(self.file_list.count())
+        ]
+
+
 @decorate_all_methods(exception_handler)
 class MainWindow(QMainWindow):
     
@@ -261,8 +377,18 @@ class MainWindow(QMainWindow):
 
         # images that are loaded in the tabs
         self.images = None
+        # paths of the images backing the tabs, in tab order
+        self._loaded_paths = []
+        # manually confirmed orders per folder: {folder: [file names]}
+        self._manual_orders = {}
         # save the threshold value while binarizing
         self.threshold = None
+
+        # action to re-open the manual ordering dialog for loaded images
+        self.actionReorderImages = QAction("Reorder Images", self)
+        self.actionReorderImages.triggered.connect(self.reorder_current_images)
+        if hasattr(self, 'menuEdit'):
+            self.menuEdit.addAction(self.actionReorderImages)
         
         # set the file filter to show only .py files
         # dialog.setNameFilter("Python files (*.png)")
@@ -382,6 +508,20 @@ class MainWindow(QMainWindow):
 
         # Case 1: Initial load from folder (no update_images provided)
         if update_images is None:
+            # Determine measurement type and input path
+            measType = ps.Meas_Type.from_window(self)
+            text = self.textInputFolder.toPlainText().strip()
+            path = Path(text)
+
+            # Resolve image paths via your settings (already sorted)
+            image_paths = measType.settings.img_from_path(path)
+
+            if image_paths:
+                image_paths = self.confirm_image_order(path, image_paths, measType)
+                if not image_paths:
+                    # User cancelled the ordering dialog: keep current tabs.
+                    return
+
             # Clear existing tabs safely
             while self.tabWidget.count():
                 w = self.tabWidget.widget(0)
@@ -389,17 +529,10 @@ class MainWindow(QMainWindow):
                     w.deleteLater()
                 self.tabWidget.removeTab(0)
 
-            # Determine measurement type and input path
-            measType = ps.Meas_Type.from_window(self)
-            text = self.textInputFolder.toPlainText().strip()
-            path = Path(text)
-
-            # Resolve image paths via your settings
-            image_paths = measType.settings.img_from_path(path)
-
             # Load raw images and keep a copy
             raw_images = [ps.load_image(image_path, measType) for image_path in image_paths]
             self.images = raw_images  # preserve original data as before
+            self._loaded_paths = list(image_paths)
 
             # Convert to QImage for display
             qimages = [self.qimage_fromdata(img) for img in raw_images]
@@ -444,6 +577,83 @@ class MainWindow(QMainWindow):
                         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
                         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
+
+    def _preview_pixmap(self, image_path, measType=None):
+        """Load a single image file as a QPixmap for the order dialog preview."""
+        try:
+            if measType is not None:
+                img = ps.load_image(image_path, measType)
+            else:
+                img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+                if img is None:
+                    return None
+            return QPixmap.fromImage(self.qimage_fromdata(img))
+        except Exception:
+            return None
+
+    def confirm_image_order(self, folder, image_paths, measType):
+        """Confirm the time order of images with the user if names are uncoded.
+
+        Returns the ordered list of paths, or an empty list if the user
+        cancels. A remembered order for the folder is reused silently.
+        """
+        predicted, needs_confirm = ps.infer_image_order(image_paths)
+        if not needs_confirm:
+            return predicted
+
+        folder_key = str(folder)
+        current_names = [p.name for p in predicted]
+        remembered = self._manual_orders.get(folder_key)
+        if remembered is not None and sorted(remembered) == sorted(current_names):
+            by_name = {p.name: p for p in image_paths}
+            return [by_name[n] for n in remembered if n in by_name]
+
+        by_name = {p.name: p for p in image_paths}
+        cache = {}
+
+        def preview_loader(name):
+            if name not in cache:
+                cache[name] = self._preview_pixmap(by_name[name], measType)
+            return cache[name]
+
+        dialog = ReorderDialog(
+            self, file_names=current_names, preview_loader=preview_loader
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return []
+        ordered_names = dialog.ordered_names()
+        self._manual_orders[folder_key] = list(ordered_names)
+        return [by_name[n] for n in ordered_names if n in by_name]
+
+    def reorder_current_images(self):
+        """Re-open the ordering dialog for the currently loaded images."""
+        if not self.images or not self._loaded_paths:
+            QMessageBox.information(
+                self, "Reorder Images", "Load images first, then reorder them."
+            )
+            return
+        # Note: extra tabs (e.g. edges/domain_fit) are left untouched; only
+        # the loaded base images are reordered.
+        names = [p.name for p in self._loaded_paths]
+        loaded = {p.name: img for p, img in zip(self._loaded_paths, self.images)}
+
+        def preview_loader(name):
+            img = loaded.get(name)
+            if img is None:
+                return None
+            return QPixmap.fromImage(self.qimage_fromdata(img))
+
+        dialog = ReorderDialog(self, file_names=names, preview_loader=preview_loader)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        ordered_names = dialog.ordered_names()
+        by_path = {p.name: p for p in self._loaded_paths}
+        self._loaded_paths = [by_path[n] for n in ordered_names if n in by_path]
+        self.images = [loaded[n] for n in ordered_names if n in loaded]
+        folder_key = self.textInputFolder.toPlainText().strip()
+        self._manual_orders[folder_key] = list(ordered_names)
+        # Refresh tab pixmaps in place so drawn direction lines are kept.
+        self.load_images(self.images)
 
     def auto_domain_select(self):
 
@@ -821,31 +1031,91 @@ class MainWindow(QMainWindow):
         # # or use setPlainText(result_text) if you want to overwrite instead
         # # self.textOutput.append("<hr>") # horizontal rule in HTML  
 
+    @staticmethod
+    def _folder_pulse_problem(folder: Path, img_type) -> Union[str, None]:
+        """Return a problem description if a folder is unfit for batch processing."""
+        try:
+            files = [p for p in folder.iterdir()
+                     if p.is_file() and np.any([p.name.endswith(x) for x in img_type])]
+        except OSError as exc:
+            return f"{folder.name}: cannot list folder ({exc})"
+        if not files:
+            return f"{folder.name}: no images found"
+        for f in files:
+            stem = re.sub(r'\.\w+$', '', f.name)
+            try:
+                ps.parse_image_stem(stem)
+            except ValueError:
+                return f"{folder.name}: '{f.name}' has no coded pulse width"
+        return None
+
+    def check_batch_folders(self, paths: Path, volts: List[str], measType) -> List[str]:
+        """Scan batch folders in a thread pool for missing pulse-width coding."""
+        img_type = measType.settings.get_img_type()
+        targets: List[Path] = []
+        for volt in volts:
+            targets.extend(
+                [d for d in paths.iterdir()
+                 if d.is_dir() and re.match(rf'^{volt}\D+', d.name)]
+            )
+        problems: List[str] = []
+        if not targets:
+            return problems
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(8, len(targets))) as pool:
+            for problem in pool.map(
+                    lambda folder: MainWindow._folder_pulse_problem(folder, img_type),
+                    targets):
+                if problem:
+                    problems.append(problem)
+        return sorted(problems)
+
+    def warn_uncoded_batch_folders(self, problems: List[str]) -> None:
+        shown = "\n".join(problems[:10])
+        if len(problems) > 10:
+            shown += f"\n... and {len(problems) - 10} more"
+        QMessageBox(
+            QMessageBox.Warning,
+            "Batch processing needs coded pulse widths",
+            f"These folders cannot be batch-processed because their image "
+            f"names do not code the pulse width:\n\n{shown}\n\n"
+            f"For batch processing every image name must code the pulse "
+            f"width (e.g. 0p44s.png, 0p44s_001.png, 0p44s10.png).\n"
+            f"See the image file naming documentation:\n{DOCS_URL}\n\n"
+            f"Measure these folders manually instead: load each folder and "
+            f"use Calculate Current.",
+            parent=self).exec()
+
     def calculate_all(self):
-        
+
         paths = Path(self.textInputFolder.toPlainText()).parent
         # out_path = paths/"DisplacementTime"
         out_path = paths/f"{self.save_folder.text()}"
-        
+
         if not out_path.exists():
             out_path.mkdir()
         else:
             # if the overwrite checkbok is not checked it will skip this directory
             if not self.bulk_overwrite_check.isChecked():
-                QMessageBox(QMessageBox.Warning, 
-                            "Warning", 
+                QMessageBox(QMessageBox.Warning,
+                            "Warning",
                             f"Specified Folder '{self.save_folder.text()}' Already Exists in the directory'{paths.name}'",
                             parent= self).exec()
                 return None
-        
+
         volts= ps.find_volt(paths)
-            
+
         arguments = dict(
                         measType = ps.Meas_Type.from_window(window = self),
                         binarize = ps.Binarize_Type.from_window(window = self)
                         )
 
-            
+        problems = self.check_batch_folders(paths, volts, arguments['measType'])
+        if problems:
+            self.warn_uncoded_batch_folders(problems)
+            return None
+
+
         do_partial =  partial(do, paths = paths, out_path = out_path, **arguments)    
         # with Pool(4) as p:
 
@@ -925,9 +1195,14 @@ class MainWindow(QMainWindow):
                         continue
                         
                 print(paths)
-                
+
                 volts= ps.find_volt(paths)
-                
+
+                problems = self.check_batch_folders(paths, volts, arguments['measType'])
+                if problems:
+                    self.warn_uncoded_batch_folders(problems)
+                    continue
+
                 do_partial =  partial(do,paths = paths, out_path = out_path, **arguments)
                 
                 with Pool(4) as p:
