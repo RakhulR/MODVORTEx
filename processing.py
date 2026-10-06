@@ -425,6 +425,9 @@ def image_from_coords(coords : np.array,
     if new_image is None:
         
         new_image  = np.zeros(shape, np.uint8)
+
+    if coords.shape[0] == 0:
+        return new_image
         
     # dws_contours = [np.expand_dims(coords, axis=1)] 
     
@@ -716,9 +719,12 @@ def bdw_detect(image, center):
         c1 = min(contours, key= lambda x : distance(contour_center(x), center))
     except ValueError as err:
         
-        c1 = np.empty((0, 0), dtype=np.int32)
+        c1 = np.empty((0, 2), dtype=np.int32)
     
-    return c1.squeeze()
+    result = c1.squeeze()
+    if result.ndim != 2:
+        result = result.reshape(-1, 2)
+    return result
 
 def cexpand_detect(images,  measType: Meas_Type) -> List[bd.B_Domain_mot]:
     """A wrapper over the analyse_image function"""
@@ -889,9 +895,9 @@ def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
 
         motions = cexpand_detect(bin_imgs, measType)
         shape = images[0].shape
-        new_img = image_from_coords(np.array([], dtype = 'int32').reshape(0, 0),shape) # Look here
+        new_img = image_from_coords(np.empty((0, 2), dtype=np.int32), shape) # Look here
         for motion in motions:
-            [image_from_coords(domain.contour.squeeze(), shape, new_img)  
+            [image_from_coords(domain.contour.reshape(-1, 2), shape, new_img)
                 for domain in motion.domains]
 
     # selecting according to the type of measurements
@@ -899,8 +905,11 @@ def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
         
         # if bubble domain type detect the closed contour corresponding to the domain using ps.bdw_detect
         dws = [bdw_detect(image, measType.center) for image in bin_imgs]
+        dws = [np.asarray(dw).reshape(-1, 2) for dw in dws if dw is not None and np.asarray(dw).size > 0]
 
         shape = images[0].shape
+        if not dws:
+            return np.zeros(shape, dtype=np.uint8)
         # ploting the contour ie the domain wall to a black image of same shape
         new_img = image_from_coords(dws[0], shape)
         [image_from_coords(dw, shape, new_img) for dw in dws]
@@ -916,7 +925,10 @@ def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
         # if domain of random shape then it probably has a psedo open contour so using ps.dw_detect which
         # uses a edege detection
         dws = [dw_detect(image) for image in bin_imgs]
+        dws = [np.asarray(dw).reshape(-1, 2) for dw in dws if dw is not None and np.asarray(dw).size > 0]
         shape = images[0].shape
+        if not dws:
+            return np.zeros(shape, dtype=np.uint8)
         new_img = image_from_coords(dws[0], shape)
         [image_from_coords(dw, shape, new_img) for dw in dws]
 

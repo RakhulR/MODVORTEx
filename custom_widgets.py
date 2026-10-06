@@ -472,9 +472,9 @@ class MainWindow(QMainWindow):
         motions = ps.cexpand_detect(bin_imgs, measType)
 
         shape = self.images[0].shape
-        new_img = ps.image_from_coords(np.array([], dtype = 'int32').reshape(0, 0),shape) # Look here
+        new_img = ps.image_from_coords(np.empty((0, 2), dtype=np.int32), shape) # Look here
         for motion in motions:
-            [ps.image_from_coords(domain.contour.squeeze(), shape, new_img)  
+            [ps.image_from_coords(domain.contour.reshape(-1, 2), shape, new_img)
                 for domain in motion.domains]
         
         new_img[new_img > 0] = 255
