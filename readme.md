@@ -87,13 +87,7 @@ source venv/bin/activate   # Linux/Mac
 pip install -r requirements.txt
 ```
 
-> **Important:** `requirements.txt` references `mymodule` via a local `.whl` file path that only exists on the author's machine. If installation fails on that line, install the remaining packages explicitly:
->
-> ```bash
-> pip install Flask jsonpickle matplotlib numba numpy opencv-python pandas psutil PyQt5 PyQt5_sip requests scipy Shapely waitress
-> ```
->
-> and obtain/install `mymodule` separately (the program imports `mymodule.utils` and `mymodule.exceptions`).
+> **Note:** the two helpers formerly taken from the external `mymodule` package (`decorate_all_methods`, `exception_handler`) are vendored in `extras.py`, so no extra package needs to be installed.
 
 ### Run from source
 
@@ -139,7 +133,7 @@ The window has a top part for viewing images and results, and a bottom part for 
 ├──────────────────────────────────────────────┬───────────────────────────────┤
 │ Image tabs (top-left, large area)            │ Folder path box               │
 │  img2[x] img3[x] img4[x] img5[x] edges[x]    │  e.g. C:\Users\...\4.2V_17     │
-│                                               [Select Folder] [Load]          │
+│                                              |[Select Folder] [Load]          │
 │                                              │          [Start API]            │
 │  Photo area: black image with white outlines,├───────────────────────────────┤
 │  red measurement line with green side lines  │ Results box                   │

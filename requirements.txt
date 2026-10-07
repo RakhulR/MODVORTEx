@@ -1,0 +1,14 @@
+Flask
+jsonpickle
+matplotlib
+numba
+numpy
+opencv_python
+pandas
+psutil
+PyQt5
+PyQt5_sip
+Requests
+scipy
+Shapely
+waitress

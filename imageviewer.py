@@ -21,8 +21,7 @@ import processing as ps
 from typing import Tuple, Union
 
 
-from mymodule.utils import decorate_all_methods
-from mymodule.exceptions import exception_handler
+from extras import decorate_all_methods, exception_handler
 
 
 if getattr(sys, 'frozen', False):

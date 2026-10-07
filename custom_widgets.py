@@ -47,8 +47,7 @@ from PyQt5.QtGui import QImage, QPixmap, QKeySequence, QDesktopServices
 # iconSize = QSize(3000,3000)
 # from werkzeug.serving import make_server
 
-from mymodule.utils import decorate_all_methods
-from mymodule.exceptions import exception_handler
+from extras import decorate_all_methods, exception_handler
 import icons
 import processing as ps
 from api import MyFlaskApp
