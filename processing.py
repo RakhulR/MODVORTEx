@@ -494,8 +494,12 @@ def dw_select(image : GrayImage ) -> List[np.array]:
         return None
     c1 = max(contours1, key=lambda x : cv2.arcLength(x, True))
     edges1 = cv2.findNonZero(image)
+    if edges1 is None:
+        return None
     # points inside the contour with biggest perimeter
-    points = [g for g in edges1.squeeze()
+    # reshape (not squeeze): a single-pixel edge map squeezes to 1D and
+    # indexing the resulting scalars raises IndexError.
+    points = [g for g in edges1.reshape(-1, 2)
               if cv2.pointPolygonTest(c1,(int(g[0]),int(g[1])),False) >= 0 ]
     
     return points
