@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QHBoxLay
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.4.0"
 
 try:
     # This will only work in IPython

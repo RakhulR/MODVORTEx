@@ -2,7 +2,7 @@
 
 **Magneto-Optical Domain Velocity Observation and Real-Time Extraction**
 
-Version 1.3.5 | Author: Rakhul Raj
+Version 1.4.0 | Author: Rakhul Raj
 
 ---
 
@@ -26,8 +26,8 @@ Version 1.3.5 | Author: Rakhul Raj
 6. [Measurement Workflows](#measurement-workflows)
    - [Bubble Directional Workflow](#bubble-directional-workflow)
    - [Arbitrary Structure Workflow](#arbitrary-structure-workflow)
-    - [Bubble Circle Fit Workflow](#bubble-circle-fit-workflow)
-    - [Manual Workflow](#manual-workflow-no-coded-pulse-widths-needed)
+   - [Bubble Circle Fit Workflow](#bubble-circle-fit-workflow)
+   - [Manual Workflow](#manual-workflow-no-coded-pulse-widths-needed)
 7. [Settings Window](#settings-window)
 8. [Image Viewer](#image-viewer)
 9. [REST API](#rest-api)
@@ -43,7 +43,7 @@ MODVORTEx is a desktop application for analyzing **magnetic domain wall motion**
 
 The software:
 
-- Loads a series of magnetic domain microscopy images (PNG, JPEG, WebP) acquired after magnetic pulses of varying pulse width.
+- Loads a series of magnetic domain microscopy images (PNG, JPEG, WebP) acquired after magnetic pulses.
 - Tracks domain wall displacement across the image sequence using one of three measurement methods.
 - Outputs displacement-vs-pulse-width curves used for calculating domain wall velocity.
 - Batch-processes all pulse-amplitude (voltage/field) folders in a dataset using multiprocessing.
@@ -53,26 +53,53 @@ The software:
 
 ## Theory
 
-When a magnetic field or current pulse is applied to a magnetic material with perpendicular magnetic anisotropy, **magnetic domains** (regions of uniform magnetization) expand or contract via **domain wall motion**. By capturing microscopy images of the domain structure after pulses of different widths (and amplitudes), the displacement of the domain wall can be measured as a function of pulse width. The **domain wall velocity** is extracted from this displacement curve (velocity = displacement / pulse width in the steady-flow regime, or the slope of the curve more generally).
+This section follows Raj et al., *Meas. Sci. Technol.* **36** (2025) 017005, and explains the measurement in plain words so you can use the software without reading the paper first.
 
-MODVORTEx supports three measurement strategies:
+### What you measure in the lab (quasistatic pulse method)
 
-| Method | Description | Best For |
-|---|---|---|
-| **Bubble Directional** | Draws a line through a bubble domain and tracks where the domain wall crosses that line | Circular bubble domains with a known center |
-| **Arbitrary Structure** | Detects the wall by edge detection and traces the full contour of any shaped domain | Non-circular, irregular domain patterns |
-| **Bubble Circle Fit** | Fits a minimum enclosing circle to each bubble domain and tracks the change in radius | Circular bubble domains expanding radially |
+Magnetic domains are regions of uniform magnetization in your sample, imaged with a Kerr microscope (which subtracts a background optical image from the live image so only the magnetic contrast remains). To find how fast a **domain wall** moves at one magnetic field:
+
+1. **Nucleate** a small domain with a suitable magnetic pulse.
+2. **Expand** it with a series of identical pulses — same field amplitude (H), same pulse width (T) — capturing a photo after each pulse. The wall moves a little further every time.
+3. **Repeat** for several pulse widths at that field, then for the next field amplitude, and so on. Think of it as a table: each row is one field, each column one pulse width.
+4. The software measures the **average wall displacement** for every table cell.
+
+For one field, plotting average displacement against pulse width gives a nearly straight line — **its slope is the wall velocity at that field**. Repeating this row by row yields velocity vs. field. Practical tip from the paper: use shorter pulse widths at higher fields so the domain stays inside the microscope's field of view.
+
+### What the software does with your photos (4 automatic steps)
+
+1. **Clean up (preprocessing):** each photo is gently smoothed (Gaussian blur, 25×25 kernel recommended) to suppress camera noise, then turned into a black-and-white image (**binarization**). You pick the brightness cutoff yourself (**Custom**) or let the program find one (**Otsu**). Practical tips from the paper:
+   - Run Otsu once on a mid-expansion photo to learn the approximate cutoff, then fix a nearby Custom value for the whole series (Otsu drifts slightly photo to photo).
+   - If your nucleated domain is dark, tick **Inverse** so the domain ends up white on black.
+2. **Find the wall (detection):** depending on the method below, the program traces the wall's outline (contour tracing) or its edges (Canny edge detection).
+3. **Measure movement (displacement):** the wall positions in consecutive photos are compared — radius change, or shift along your drawn line — converted from pixels to real units with the **Scale** setting (e.g. µm per pixel, set under `View > Settings`).
+4. **Get velocity:** `Calculate All` collects displacement-vs-pulse-width tables per field; you fit a straight line through each (use `Plot Current` to view them) and read the slope as velocity.
+
+### Which of the 3 methods to pick
+
+| Paper name | Choice in the software | What it does, simply | Best for |
+|---|---|---|---|
+| Method 1 – bubble circle fit | `BUBBLE_CIRCLE_FIT` | Draws the smallest circle around each bubble in every photo and tracks how the radius grows; multiple bubbles are averaged | Round bubble domains expanding evenly |
+| Method 2 – enclosed-domain directional | `BUBBLE_DIRECTIONAL` | Picks the closed outline nearest your **D Center Select** point and measures where it crosses your drawn direction line — different directions can have different speeds | Closed domains expanding unevenly, e.g. DMI studies with an in-plane field |
+| Method 3 – open/arbitrary structure | `ARBITRARY_STRUCTURE` | Finds wall edges (even ones running out of the photo, e.g. straight stripes), orders the edge points end-to-end, and measures the shift along your line | Stripes, racetracks, or any irregular wall pattern |
+
+Use cases from the paper include bubble dynamics, Dzyaloshinskii–Moriya interaction (DMI) studies, current-driven wall motion in patterned strips/racetracks, and in-plane samples with straight walls. Direct (stroboscopic / high-speed camera) measurements are also possible through the built-in API instead of the pulse workflow.
 
 ---
 
 ## Installation
 
-### Prerequisites
+### Windows 10 and above (preferred method)
+
+You can **download** the zip file from here — [https://github.com/RakhulR/MODVORTEx/releases/tag/v1.4.0](https://github.com/RakhulR/MODVORTEx/releases/tag/v1.4.0) — extract the zip and run the exe file. No Python installation needed.
+
+### Older Windows, Linux and macOS (run with Python)
+
+#### Prerequisites
 
 - Python 3.9 or newer (tested with Python 3.12)
-- Windows, Linux, or macOS
 
-### Install from source
+#### Install from source
 
 ```bash
 # Clone or download the repository
@@ -133,7 +160,7 @@ The window has a top part for viewing images and results, and a bottom part for 
 ├──────────────────────────────────────────────┬───────────────────────────────┤
 │ Image tabs (top-left, large area)            │ Folder path box               │
 │  img2[x] img3[x] img4[x] img5[x] edges[x]    │  e.g. C:\Users\...\4.2V_17     │
-│                                              |[Select Folder] [Load]          │
+│                                              │[Select Folder] [Load]          │
 │                                              │          [Start API]            │
 │  Photo area: black image with white outlines,├───────────────────────────────┤
 │  red measurement line with green side lines  │ Results box                   │
@@ -198,8 +225,8 @@ The large area on the left is a tab widget. Each loaded image gets its own tab l
 ```
 Dataset/
 ├── 25V_1/
-│   ├── 1p1s.png
-│   ├── 1p1s_01.png
+│   ├── 1p0us.png
+│   ├── 1p0us_001.png
 │   └── ...
 ├── 25V_2/
 │   └── ...
@@ -207,7 +234,7 @@ Dataset/
 │   └── ...
 ```
 
-Point the path box at **one** image folder (e.g. `25V_1`). That folder is what you inspect and measure interactively; `Calculate All` then processes all of its sibling amplitude folders (`25V_1`, `25V_2`, `30V_1`, …). Each sibling folder name must start with the amplitude value followed by a non-digit character (e.g. `25V_1`), and images inside must encode the pulse width in their file names (e.g. `1p0us.png`).
+Point the path box at **one** image folder (e.g. `25V_1`). That folder is what you inspect and measure interactively; `Calculate All` then processes all of its sibling amplitude folders (`25V_1`, `25V_2`, `30V_1`, …). Each sibling folder name must start with the amplitude value followed by a non-digit character (e.g. `25V_1`), and all images inside one folder must encode the **same** pulse width in their file names (e.g. `1p0us.png`, `1p0us_001.png`, … — the whole folder is labelled by that one width).
 
 ### Measurement Type
 
@@ -268,7 +295,7 @@ Used exclusively by the `BUBBLE_CIRCLE_FIT` method.
 
 - **`Calculate Current` button:** Computes displacement for the currently loaded image set and prints mean displacement and standard deviation (in scaled physical units) to the text output area. The file names do not need to code the pulse width — load any image sequence, confirm the order if asked, and measure each amplitude manually one folder at a time.
 - **`Calculate All` button:** Batch-processes every amplitude folder sitting next to the loaded folder, using a pool of 4 worker processes. While running, the button reads "Stop" — click it again to terminate the workers. Requires coded pulse widths in every image name; folders without them are checked first and listed in a warning instead of starting the run.
-- **`Bulk Calculate` button:** Goes one directory level higher and processes every experiment folder whose name ends in `mT`, each in turn like `Calculate All` (currently single-purpose for field datasets; disabled unless enabled in code).
+- **`Bulk Calculate` button:** Goes one directory level higher and processes every experiment folder whose name ends in `mT`, each in turn like `Calculate All` (single-purpose for field datasets; currently disabled).
 - **`Result Save Folder` field** (default: `DisplacementTime`): Name of the subfolder (created next to the processed folders) where result files are written.
 - **`Overwrite if save folder exists` checkbox:** If unchecked and the save folder already exists, you get a warning and the run is skipped instead of overwriting.
 - **`Plot Current` button:** Reads the result files from the save folder and plots displacement-vs-pulse-width curves (one series per amplitude) with Matplotlib.
@@ -292,7 +319,7 @@ Used exclusively by the `BUBBLE_CIRCLE_FIT` method.
 
 ### Bubble Directional Workflow
 
-For circular bubble domains expanding around a center.
+For enclosed domains (including circular bubbles) expanding around a center — e.g. asymmetric expansion in DMI studies.
 
 1. **Load images** of the bubble domain sequence.
 2. **Select `BUBBLE_DIRECTIONAL`** in the measurement type dropdown.
@@ -343,7 +370,7 @@ Accessed via `View > Settings`. Values take effect only after clicking **Set** �
 
 | Setting | Description | Default (`settings/default.set`) |
 |---|---|---|
-| **Scale** | Physical distance per pixel (e.g. µm/pixel). Pixel displacements are multiplied by this. Calibrate it for your microscope. | 0.67114093 |
+| **Scale** | Physical distance per pixel (e.g. µm/pixel). Pixel displacements are multiplied by this. Calibrate it for your microscope. | 1 |
 | **Gaussian Blur Kernel** | Kernel size of the Gaussian blur applied before binarization. Must be odd. | 25 |
 | **Max Width** | Crop images to this width in pixels (0 = no cropping). | 0 |
 | **Max Height** | Crop images to this height in pixels (0 = no cropping). | 512 |
@@ -463,7 +490,9 @@ The remaining lines are tab-separated with three columns:
 
 ### Velocity calculation
 
-Import the displacement-vs-pulse-width tables into your analysis tool of choice (Origin, Python, MATLAB, …) and extract the velocity from the displacement curve.
+Import the displacement-vs-pulse-width tables into your analysis tool of choice (Origin, Python, MATLAB, …) and fit a straight line through each field's points — the slope is the wall velocity at that field.
+
+ The current build stops one step earlier: it exports the displacement tables and draws the curves (`Plot Current`), and you do the linear fit yourself. Points with large scatter can then be re-fit or excluded manually. In a future version the automatic linear fitting can also be expected.
 
 ---
 
@@ -484,8 +513,8 @@ Import the displacement-vs-pulse-width tables into your analysis tool of choice 
 
 If MODVORTEx is useful in your research, please cite:
 
-1. Rakhul Raj et al., *Meas. Sci. Technol.* **36** (2025) 015001 [DOI: 10.1088/1361-6501/ad8beb](https://dx.doi.org/10.1088/1361-6501/ad8beb)
-2. Rakhul Raj et al., *Meas. Sci. Technol.* **34** (2023) 085001 [DOI: 10.1088/1361-6501/acd39d](https://dx.doi.org/10.1088/1361-6501/acd39d)
+1. Rakhul Raj et al., *Meas. Sci. Technol.* **36** (2025) 017005 [DOI: 10.1088/1361-6501/ad8beb](https://dx.doi.org/10.1088/1361-6501/ad8beb)
+2. Rakhul Raj et al., *Meas. Sci. Technol.* **34** (2023) 097001 [DOI: 10.1088/1361-6501/acd39d](https://dx.doi.org/10.1088/1361-6501/acd39d)
 
 ---
 
