@@ -161,7 +161,7 @@ class Modvortex_ImageProcessor(imageviewer.ImageProcessor):
         # self.measType = ps.Meas_Type.from_window(self.mainwindow)
 
         # getting the start image from mainwindow and setting it
-        text = self.mainwindow.textInputFolder.toPlainText()
+        text = self.mainwindow.input_folder()
         self.start_path = Path(text)
         self.set_folder(self.start_path)
     
@@ -330,11 +330,13 @@ class MainWindow(QMainWindow):
                                            if self.calcAllButton.text() == "Calculate All"
                                             else self.stop_calculate_all() )
         self.bulkcalcButton.clicked.connect(self.calculate_all_from_parent)
+        # Bulk Calculate stays disabled until explicitly enabled in the future.
+        self.bulkcalcButton.setEnabled(False)
         
             
         self.loadfolder.clicked.connect(self.loadfolder_f)
-        self.plot_button.clicked.connect(lambda  : self.plot(Path(self.textInputFolder.toPlainText()).parent/
-                                                             self.save_folder.text()                                                             
+        self.plot_button.clicked.connect(lambda  : self.plot(Path(self.input_folder()).parent/
+                                                             self.result_folder_name()
                                                              ))
         
         self.dselect_button.clicked.connect(self.auto_domain_select)
@@ -415,6 +417,22 @@ class MainWindow(QMainWindow):
     def open_docs(self):
         QDesktopServices.openUrl(QUrl("https://github.com/RakhulR/MODVORTEx"))
 
+
+    def input_folder(self) -> str:
+        """Stripped folder path from the path box (writes the cleanup back)."""
+        raw = self.textInputFolder.toPlainText()
+        cleaned = raw.strip()
+        if cleaned != raw:
+            self.textInputFolder.setPlainText(cleaned)
+        return cleaned
+
+    def result_folder_name(self) -> str:
+        """Stripped result save-folder name (writes the cleanup back)."""
+        raw = self.save_folder.text()
+        cleaned = raw.strip()
+        if cleaned != raw:
+            self.save_folder.setText(cleaned)
+        return cleaned
 
     def loadfolder_f(self):
         # create a file dialog object
@@ -510,8 +528,16 @@ class MainWindow(QMainWindow):
         if update_images is None:
             # Determine measurement type and input path
             measType = ps.Meas_Type.from_window(self)
-            text = self.textInputFolder.toPlainText().strip()
+            text = self.input_folder()
             path = Path(text)
+
+            if not path.is_dir():
+                QMessageBox(QMessageBox.Warning,
+                            "Warning",
+                            f"Image folder not found:\n'{path}'\n\n"
+                            f"Use Select Folder to pick the image folder.",
+                            parent=self).exec()
+                return
 
             # Resolve image paths via your settings (already sorted)
             image_paths = measType.settings.img_from_path(path)
@@ -650,7 +676,7 @@ class MainWindow(QMainWindow):
         by_path = {p.name: p for p in self._loaded_paths}
         self._loaded_paths = [by_path[n] for n in ordered_names if n in by_path]
         self.images = [loaded[n] for n in ordered_names if n in loaded]
-        folder_key = self.textInputFolder.toPlainText().strip()
+        folder_key = self.input_folder()
         self._manual_orders[folder_key] = list(ordered_names)
         # Refresh tab pixmaps in place so drawn direction lines are kept.
         self.load_images(self.images)
@@ -1088,9 +1114,17 @@ class MainWindow(QMainWindow):
 
     def calculate_all(self):
 
-        paths = Path(self.textInputFolder.toPlainText()).parent
+        folder = Path(self.input_folder())
+        if not folder.is_dir():
+            QMessageBox(QMessageBox.Warning,
+                        "Warning",
+                        f"Image folder not found:\n'{folder}'\n\n"
+                        f"Check the folder path box.",
+                        parent=self).exec()
+            return None
+        paths = folder.parent
         # out_path = paths/"DisplacementTime"
-        out_path = paths/f"{self.save_folder.text()}"
+        out_path = paths/f"{self.result_folder_name()}"
 
         if not out_path.exists():
             out_path.mkdir()
@@ -1099,7 +1133,7 @@ class MainWindow(QMainWindow):
             if not self.bulk_overwrite_check.isChecked():
                 QMessageBox(QMessageBox.Warning,
                             "Warning",
-                            f"Specified Folder '{self.save_folder.text()}' Already Exists in the directory'{paths.name}'",
+                            f"Specified Folder '{self.result_folder_name()}' Already Exists in the directory'{paths.name}'",
                             parent= self).exec()
                 return None
 
@@ -1150,7 +1184,8 @@ class MainWindow(QMainWindow):
             print(e)
             pass
         finally:
-            self.bulkcalcButton.setEnabled(True)
+            # Keep Bulk Calculate disabled (enable here when the feature is wanted).
+            self.bulkcalcButton.setEnabled(False)
             self.calcAllButton.setText("Calculate All")
 
     def stop_calculate_all(self):
@@ -1158,10 +1193,18 @@ class MainWindow(QMainWindow):
         self.pool.terminate()
             
     def calculate_all_from_parent(self):
-        
-        paths_parent = Path(self.textInputFolder.toPlainText()).parent.parent
-        
-        folder_name = self.save_folder.text()
+
+        folder = Path(self.input_folder())
+        if not folder.is_dir():
+            QMessageBox(QMessageBox.Warning,
+                        "Warning",
+                        f"Image folder not found:\n'{folder}'\n\n"
+                        f"Check the folder path box.",
+                        parent=self).exec()
+            return None
+        paths_parent = folder.parent.parent
+
+        folder_name = self.result_folder_name()
         
 
         
@@ -1225,11 +1268,26 @@ class MainWindow(QMainWindow):
         '''
         # pattern = re.compile(r"\d+\.\d+mT\.txt")
         pattern = re.compile(r'^[+-]?\d+(\.\d+)?\D+')
-        
-        
-        path = Path(path)
-        
+
+
+        path = Path(str(path).strip())
+
+        if not path.is_dir():
+            QMessageBox(QMessageBox.Warning,
+                        "Warning",
+                        f"Result folder not found:\n'{path}'\n\n"
+                        f"Run Calculate All first, then plot.",
+                        parent=self).exec()
+            return
+
         files = [x for x in path.iterdir() if pattern.match(x.name)]
+
+        if not files:
+            QMessageBox(QMessageBox.Warning,
+                        "Warning",
+                        f"No result files found in:\n'{path}'",
+                        parent=self).exec()
+            return
         
         fig, ax = plt.subplots()
         # sorting the files according to the field value
