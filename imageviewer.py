@@ -173,7 +173,9 @@ class ImageProcessor(QMainWindow):
                     except ConnectionError as ce:
                         return None
                 else:
-                    image =  images[2]
+                    # Third frame when available, else the last one, so
+                    # folders with fewer than 3 images still display.
+                    image = images[min(2, len(images) - 1)]
                 # pixmap = QPixmap(str(images[0]))  # Load the first image for now
                 qimage = self.qimage_fromdata(image)
                 pixmap = QPixmap.fromImage(qimage)
