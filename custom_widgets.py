@@ -685,7 +685,20 @@ class MainWindow(QMainWindow):
         # Refresh tab pixmaps in place so drawn direction lines are kept.
         self.load_images(self.images)
 
+    def _require_images(self) -> bool:
+        """Warn and return False when no images are loaded yet."""
+        if not self.images:
+            QMessageBox(QMessageBox.Information,
+                        "No images loaded",
+                        "Load images first (Select Folder, then Load).",
+                        parent=self).exec()
+            return False
+        return True
+
     def auto_domain_select(self):
+
+        if not self._require_images():
+            return
 
         binarize = ps.Binarize_Type.from_window(self)
         bin_imgs = binarize.binarize_list(images= self.images)
@@ -702,6 +715,9 @@ class MainWindow(QMainWindow):
         self.select_domain_line.setText(centres_str) 
     
     def show_circle_fit(self):
+
+        if not self._require_images():
+            return
 
         binarize = ps.Binarize_Type.from_window(self)
         bin_imgs = binarize.binarize_list(images= self.images)
@@ -751,6 +767,9 @@ class MainWindow(QMainWindow):
         self.coord_label.setText(f"Current Coordinates (pixels): ({x}, {y})")  # Update with the current coordinates
 
     def plt_hist(self):
+
+        if not self._require_images():
+            return
 
         kernel = ps.Binarize_Type.from_window(window= self).kernel
 
@@ -803,7 +822,10 @@ class MainWindow(QMainWindow):
             
     
     def display_binarized(self, satus):
-        
+
+        if not self._require_images():
+            return
+
         current_index = self.tabWidget.currentIndex()
         
         if satus:
@@ -1027,6 +1049,8 @@ class MainWindow(QMainWindow):
 
 
     def set_edge(self):
+        if not self._require_images():
+            return
         binarize = ps.Binarize_Type.from_window(self)
         measType = ps.Meas_Type.from_window(window = self)
         new_img = ps.get_edge(self.images, binarize, measType)
@@ -1039,6 +1063,8 @@ class MainWindow(QMainWindow):
         self.add_label_as_tab(label, "edges")
 
     def calculate_current(self):
+        if not self._require_images():
+            return
         # Calculating distance
         displacements = ps.calculate_motion_displace(
             self.images,

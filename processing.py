@@ -831,6 +831,8 @@ def bdw_detect(image, center):
 
 def cexpand_detect(images,  measType: Meas_Type) -> List[bd.B_Domain_mot]:
     """A wrapper over the analyse_image function"""
+    if not images:
+        return []
     mt = measType
     motions = bd.analyse_images(images, mt.settings.scale, mt.roundness, mt.select_domain )
     motions.sort(key = lambda x : np.linalg.norm((np.array(x.centre) - np.array(images[0].shape)[::-1]/2)))
@@ -998,6 +1000,8 @@ def load_image(image_path: Union[pathlib.Path,str], measType : Meas_Type):
 def get_edge(images, binarize :Binarize_Type, measType: Meas_Type):
 
     ''' get a edge image'''
+    if not images:
+        raise ValueError("get_edge() requires at least one image, got none.")
     # if self.b_combo_box.currentIndex() == 1:
     #     binarize = self.otsu_binarize
     # else:
