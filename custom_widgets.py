@@ -103,9 +103,13 @@ class PoolManager:
 
 def do(volt, paths, out_path, measType, binarize):
 
-    sel_paths: List[Path] = [dirs for dirs in paths.iterdir() if re.match(rf'^{volt}\D+', dirs.name) and dirs.is_dir()]
+    sel_paths: List[Path] = [dirs for dirs in paths.iterdir() if re.match(rf'^{re.escape(volt)}\D+', dirs.name) and dirs.is_dir()]
     sel_paths.sort(key = ps.sort_key)
-    
+
+    if not sel_paths:
+        print(f"Skipping voltage '{volt}': no matching folders in '{paths}'")
+        return
+
     # extracting the unit of the folders in which images are found
     unit = re.findall(r'[^0-9.]+', sel_paths[0].name)
     unit = unit[0] if unit else ""

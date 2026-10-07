@@ -423,13 +423,19 @@ def  find_volt(path: pathlib.Path):
 
     '''
     a = []
-    pattern = re.compile(r'^[+-]?\d+(\.\d+)?')
+    # Capture only the leading number as the key so multi-letter units
+    # (e.g. mT in 25mT_1) keep working: the old split('_')[0][:-1] assumed
+    # a single-character unit and produced keys like '25m' that crash float().
+    pattern = re.compile(r'^([+-]?\d+(?:\.\d+)?)')
 
     for x in path.iterdir():
 
-        if pattern.match(x.name) and x.is_dir():
+        if not x.is_dir():
+            continue
 
-            name = x.name.split('_')[0][:-1]
+        m = pattern.match(x.name)
+        if m:
+            name = m.group(1)
 
             if not name in a:
                 a.append(name)
