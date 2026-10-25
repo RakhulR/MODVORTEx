@@ -83,7 +83,7 @@ For one field, plotting average displacement against pulse width gives a nearly 
 | Method 2 – enclosed-domain directional | `BUBBLE_DIRECTIONAL` | Picks the closed outline nearest your **D Center Select** point and measures where it crosses your drawn direction line — different directions can have different speeds | Closed domains expanding unevenly, e.g. DMI studies with an in-plane field |
 | Method 3 – open/arbitrary structure | `ARBITRARY_STRUCTURE` | Finds wall edges (even ones running out of the photo, e.g. straight stripes), orders the edge points end-to-end, and measures the shift along your line | Stripes, racetracks, or any irregular wall pattern |
 
-Use cases from the paper include bubble dynamics, Dzyaloshinskii–Moriya interaction (DMI) studies, current-driven wall motion in patterned strips/racetracks, and in-plane samples with straight walls. Direct (stroboscopic / high-speed camera) measurements are also possible through the built-in API instead of the pulse workflow.
+Use cases include bubble dynamics, Dzyaloshinskii–Moriya interaction (DMI) studies, current-driven wall motion in patterned strips/racetracks, and in-plane samples with straight walls. Direct (stroboscopic / high-speed camera) measurements are also possible through the built-in API instead of the pulse workflow.
 
 ---
 
@@ -97,7 +97,7 @@ You can **download** the zip file from here — [https://github.com/RakhulR/MODV
 
 #### Prerequisites
 
-- Python 3.9 or newer (tested with Python 3.12)
+- Python (tested with Python 3.12, older and newer versions should work)
 
 #### Install from source
 
@@ -113,8 +113,6 @@ source venv/bin/activate   # Linux/Mac
 # Install dependencies
 pip install -r requirements.txt
 ```
-
-> **Note:** the two helpers formerly taken from the external `mymodule` package (`decorate_all_methods`, `exception_handler`) are vendored in `extras.py`, so no extra package needs to be installed.
 
 ### Run from source
 
